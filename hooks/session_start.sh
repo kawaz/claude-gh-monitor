@@ -1,44 +1,42 @@
 #!/usr/bin/env bash
 # Claude Code SessionStart hook.
-# 現在の worktree に紐づく open PR を検出して pr-watch.sh の起動指示を stdout に出す。
+# 現在の worktree に紐づく open PR を検出して pr-watch スキルの起動を促す。
 #
-# hook としての期待動作:
-#   - PR が検出できれば、Monitor ツール起動を促す指示を stdout に出す
-#     (Claude 本体が見て適切に Monitor を起動する)
-#   - 検出できなければ sys.exit(0) 相当で終了（無害）
+# 設計思想:
+#   - hook 自身では Monitor を起動しない（Monitor のライフサイクルは Claude 本体が管理すべき）
+#   - hook は "pr-watch スキルを起動してほしい" というメッセージを stdout に出すだけ
+#   - stdout は Claude Code のコンテキストに注入されるので、Claude が読んで判断する
 #
-# ※ hook は Claude Code harness から呼ばれる前提。
-#   単独で Monitor を起動することはしない（harness の責務を尊重）。
+# hook の exit code は 0 固定（PR 無しでも "何も出力しない exit 0"）
 
 set -u
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-REPO_ROOT="$SCRIPT_DIR/.."
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 
-# 作業ディレクトリ (CLAUDE_PROJECT_DIR が設定されていればそれを使う)
+# 作業ディレクトリ (CLAUDE_PROJECT_DIR 優先)
 workdir=${CLAUDE_PROJECT_DIR:-$(pwd)}
 
 # PR 検出
 result=$("$REPO_ROOT/scripts/detect-pr.sh" "$workdir" 2>/dev/null || true)
 if [ -z "$result" ]; then
-    # PR 無しなら何も出さずに exit 0
+    # PR 無しなら何も出さずに終了
     exit 0
 fi
 
 repo=$(printf '%s' "$result" | cut -f1)
 pr=$(printf '%s' "$result" | cut -f2)
 
-# Claude に "この PR を監視してください" と指示するマーカー
-# (SessionStart hook の出力は Claude のコンテキストに注入される)
+# Claude への指示（構造化メッセージ）
+# "[claude-pr-monitor]" プレフィックスで目印を付ける
 cat <<EOF
-[claude-pr-monitor] 現在のブランチは PR $repo#$pr に紐づいています。
+[claude-pr-monitor] SessionStart hook: このセッションの worktree は PR ${repo}#${pr} に紐づいています。
 
-Claude Code は以下のコマンドを Monitor ツールで起動してください（PR 状態の変化を通知するため）:
+pr-watch スキルを起動して、この PR の状態変化（新規コメント・レビュー・CI・マージ状態）を Monitor で継続監視してください。
 
-command: "$REPO_ROOT/scripts/pr-watch.sh" "$repo" "$pr"
-description: "PR $repo#$pr 監視"
-persistent: true
-timeout_ms: 3600000
+起動引数:
+- OWNER/REPO: ${repo}
+- PR_NUMBER:  ${pr}
 
-既に同じ PR を監視している Monitor があれば、重複起動は不要です。
+重複防止: 既に同じ PR を監視している Monitor タスクがある場合（description に "PR ${repo}#${pr} 監視" が含まれる）、追加起動は不要です。
 EOF
