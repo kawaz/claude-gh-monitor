@@ -139,47 +139,47 @@
 
 ---
 
-## 5. 未着手・検討が必要な点（新セッションで進める）
+## 5. 進捗と残課題
 
-### (A) スキルの skill-creator プロセス完走
+### (A) skill-creator プロセス ✅ 完走
 
-skill-creator の標準プロセスに従って評価する:
-1. SKILL.md の draft（作成済み）の精査
-2. テストケース 2-3 個を `evals/evals.json` に書く
-3. 実運用でいくつかの PR で動かしてみて、emit 内容の過不足を確認
-4. フィードバックを受けて iteration
+- SKILL.md を draft から実装整合版に更新（2026-04-23）
+- `evals/evals.json` を 3 → 7 ケースに拡充（dup-avoidance, multi-PR, stop, closed 追加）
+- skill description optimizer 未実施（GitHub 公開後に iterate 予定）
 
-現状の draft は実装ベース。実運用と乖離があれば修正する。
+### (B) SessionStart hook ✅ 改修済み
 
-### (B) SessionStart hook の Claude 側受け取り挙動確認
+- hook 出力は「pr-watch スキルを起動してほしい」という明示指示に構造化
+- 起動引数・重複防止方法を箇条書きで提示し Claude が読み取りやすい形に
+- 実際の Claude 受け取り挙動は実運用セッションで継続観察
 
-hook の stdout 出力を Claude Code がどのように扱うかの仕様を確認:
-- hook 出力は `<session-start-hook>` 的なタグで Claude のコンテキストに注入されるはず
-- 「Monitor 起動指示を出しても Claude が確実に Monitor ツールで起動してくれるか」を検証
-- 起動を確実にするため、hook 出力のフォーマットを調整する可能性あり
+### (C) 重複起動防止 ✅ 対応済み
 
-### (C) 既存 Monitor との重複起動防止
+- SKILL.md に TaskList での確認手順を明文化
+- description `PR owner/repo#N 監視` をキーにして重複判定
 
-同一セッション内で複数回 `/pr-watch` を呼ばれた場合、同じ PR に対して複数 Monitor が起動しないようにしたい:
-- Monitor ツールに「既存タスク一覧を取る」機能があるか確認
-- あれば起動前にチェック、なければ SKILL.md 側で Claude に注意を促す
+### (D) 複数 PR 対応 ✅ 対応済み
 
-### (D) 複数 PR 対応
+- SKILL.md に「PR ごとに個別 Monitor を起動してよい」ルールを追記
+- description で区別すれば重複判定もそのまま動作
 
-1セッションで複数 worktree/PR を触るケース（稀だが存在）:
-- 現状は SessionStart で検出した 1 PR のみ監視
-- 必要なら `/pr-watch <PR>` 形式で追加起動できるよう、SKILL.md を拡張
+### (E) 設定ファイル配布 ✅ ドキュメント化
 
-### (E) 設定ファイルの配布
+- README.md に 推奨(グローバル) / プロジェクト毎 の両方を明記
+- 前提（gh / jq / gh auth）も README 冒頭に記述
 
-現在 `settings.json.sample` を示すだけ。ユーザーが自分のプロジェクトごとに統合する必要がある:
-- グローバル `.claude/settings.json` に入れるなら1回で全プロジェクト有効化可
-- プロジェクト毎に入れるなら `.gitignore` で除外する運用か、逆に commit してチーム共有か
-- 推奨を SKILL.md または README に明記
+### (F) 実運用検証 ⏳ 継続
 
-### (F) 実運用での検証
+- antenna #2108 Monitor は別セッション所属のため本セッションから直接観察不可
+- 代わりに emit 部を jq 単体で dry-run し、DESIGN.md §4 仕様に沿うことを確認
+  （[docs/findings/2026-04-23-emit-dry-run.md](findings/2026-04-23-emit-dry-run.md)）
+- GitHub 公開後、実運用セッションで観察される emit を基に必要な調整を行う
 
-antenna プロジェクトの PR #2108 で現行スクリプトを動かし中（このセッションの Monitor で）。実際の変化が emit されるか、誤検知がないかを観察して、設計にフィードバック。
+### 追加の改善候補（将来）
+
+- `[CI]` 行で PR check の URL まで含める（failure 時に深堀りが速い）
+- `--watch-own` / `--watch-assigned` 等の CLI 引数で対象を切り替え
+- ChangeLog / `--version` 追加（公開時）
 
 ---
 
