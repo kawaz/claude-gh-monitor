@@ -39,12 +39,13 @@
 
 | # | 項目 | 決定内容 |
 |---|---|---|
-| 1 | 起動形態 | **SessionStart hook** で自動起動（手動 `/pr-monitor` スキルも提供） |
-| 2 | 監視項目 | 新規コメント / レビュー state変化 / CI state変化 / PR state (open/closed/merged) |
-| 3 | セッション間の干渉 | **(A) 各セッション独立**（Bash で 1プロセス ~2MB なのでロック機構は不要） |
-| 4 | 終了条件 | **セッション終了時**（= 基本常時稼働）。PR merged / closed でもスクリプト側で exit 0 |
-| 5 | 配置場所 | **`github.com/kawaz/claude-pr-monitor`** 新規リポジトリ（個人 OSS、MIT） |
-| 6 | 実装言語 | **Bash + `gh` + `jq`**（メモリ効率重視。Bun/TS 検討もしたが 1PR=2MB 優位） |
+| 1 | 配布形態 | **Claude Code Plugin**（`.claude-plugin/` + `marketplace.json`）。`claude plugin install pr-monitor@claude-pr-monitor` でインストール |
+| 2 | 起動形態 | **SessionStart hook** (`startup` + `resume` matcher) で自動起動。手動起動も可 |
+| 3 | 監視項目 | 新規コメント / レビュー state変化 / CI state変化 / PR state (open/closed/merged) |
+| 4 | セッション間の干渉 | **(A) 各セッション独立**（Bash で 1プロセス ~2MB なのでロック機構は不要） |
+| 5 | 終了条件 | **セッション終了時**（= 基本常時稼働）。PR merged / closed でもスクリプト側で exit 0 |
+| 6 | 配置場所 | **`github.com/kawaz/claude-pr-monitor`** 新規リポジトリ（個人 OSS、MIT） |
+| 7 | 実装言語 | **Bash + `gh` + `jq`**（メモリ効率重視。Bun/TS 検討もしたが 1PR=2MB 優位） |
 
 ### 議論の経緯（要点）
 
@@ -62,10 +63,10 @@
 [Claude Code Session 開始]
         │
         ▼
-[SessionStart hook] ← settings.json の hooks.SessionStart で登録
+[SessionStart hook] ← plugin の hooks/hooks.json (matcher=startup|resume)
         │
         ▼
-[hooks/session_start.sh] ← bash ラッパー
+[hooks/session_start.sh] ← ${CLAUDE_PLUGIN_ROOT}/hooks/ 配下
         │
         ▼
 [scripts/detect-pr.sh] ← 現 worktree のブランチ → PR 検出
@@ -92,11 +93,14 @@
 
 | ファイル | 責務 |
 |---|---|
-| `hooks/session_start.sh` | SessionStart hook。PR 検出 → Monitor 起動指示を stdout に出す |
+| `.claude-plugin/plugin.json` | plugin manifest (name / version / author / repository) |
+| `.claude-plugin/marketplace.json` | marketplace manifest (install 用) |
+| `hooks/hooks.json` | SessionStart hook の登録 (startup + resume matcher) |
+| `hooks/session_start.sh` | hook 本体。PR 検出 → skill 起動指示を stdout に出す |
 | `scripts/detect-pr.sh` | カレントブランチから open PR を検出。`OWNER/REPO\tPR_NUMBER` を出す |
 | `scripts/pr-monitor.sh` | Monitor 対象本体。60s ごとに `gh pr view` し、変化時のみ 1 行 emit |
-| `skills/pr-monitor/SKILL.md` | 手動起動用のスキル定義。AI が判断して呼ぶ |
-| `settings.json.sample` | `.claude/settings.json` への組み込みサンプル |
+| `skills/pr-monitor/SKILL.md` | skill 定義。Monitor 起動引数・通知行の意味・重複防止 |
+| `justfile` | validate / lint / version / push |
 
 ### スクリプト間の責任分担
 
@@ -163,10 +167,13 @@
 - SKILL.md に「PR ごとに個別 Monitor を起動してよい」ルールを追記
 - description で区別すれば重複判定もそのまま動作
 
-### (E) 設定ファイル配布 ✅ ドキュメント化
+### (E) 設定ファイル配布 ✅ Plugin 化で解決
 
-- README.md に 推奨(グローバル) / プロジェクト毎 の両方を明記
-- 前提（gh / jq / gh auth）も README 冒頭に記述
+- Claude Code plugin 化 (`.claude-plugin/plugin.json` + `marketplace.json`) により
+  `claude plugin install pr-monitor@claude-pr-monitor` 1 発でデプロイ可能に
+- `hooks/hooks.json` が SessionStart hook を自動登録するので、ユーザが
+  `~/.claude/settings.json` を手動編集する必要が無くなった
+- 前提（gh / jq / gh auth）は README 冒頭に記述
 
 ### (F) 実運用検証 ⏳ 継続
 

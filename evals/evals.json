@@ -8,7 +8,7 @@
       "prompt": "PR #2108 のレビューと CI の状態変化を監視して、新しいコメントや承認が来たら教えて。今は別の作業をしているので、変化があった時だけ通知してくれればいい。リポジトリは emeradaco/antenna ね。",
       "expected_behavior": [
         "TaskList を確認して pr-monitor が重複起動しないことを確認する",
-        "Monitor ツールで scripts/pr-monitor.sh を emeradaco/antenna 2108 を引数として起動する",
+        "Monitor ツールで ${CLAUDE_PLUGIN_ROOT}/scripts/pr-monitor.sh を emeradaco/antenna 2108 を引数として起動する",
         "description は 'PR emeradaco/antenna#2108 監視' 相当",
         "persistent: true で起動する",
         "ユーザに '監視を開始しました' 的な短い報告をする"
@@ -19,7 +19,7 @@
       "name": "implicit-from-push",
       "prompt": "今 PR をプッシュしたんだけど、CI が通ってレビューが終わったら Slack に貼るやつ書きたいから、それまで他の作業してるね。状態変わったら教えて。",
       "expected_behavior": [
-        "現在の worktree のブランチから scripts/detect-pr.sh で PR を検出する",
+        "現在の worktree のブランチから ${CLAUDE_PLUGIN_ROOT}/scripts/detect-pr.sh で PR を検出する",
         "検出に成功したら pr-monitor スキルを起動する",
         "ユーザは PR 番号を言わないが AI が自律判断で検出 → 起動までやる",
         "検出に失敗した場合は 'この worktree には open PR がありません' と報告"
@@ -30,7 +30,7 @@
       "name": "no-pr-on-current-branch",
       "prompt": "CI どうなった？",
       "expected_behavior": [
-        "scripts/detect-pr.sh を実行し exit 1 が返る（PR なし）",
+        "${CLAUDE_PLUGIN_ROOT}/scripts/detect-pr.sh を実行し exit 1 が返る（PR なし）",
         "pr-monitor を起動せず、'この worktree には open PR がないようです' と報告",
         "代案として 'PR 番号を指定してもらえれば起動できる' と提案してもよい"
       ]
