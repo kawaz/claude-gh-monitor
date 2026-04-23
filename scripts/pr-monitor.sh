@@ -79,8 +79,13 @@ while true; do
     cur_max_review_at=$(printf '%s' "$cur"  | jq -r '[.reviews[].submittedAt | select(. != null)] | max // ""' 2>/dev/null)
 
     # CI 側のハッシュ（独立管理）
-    ci_cur_hash=$(printf '%s' "$cur" | jq -c '[.statusCheckRollup[] | {name, status, conclusion}]' \
-        2>/dev/null | sha256sum | cut -d" " -f1)
+    # statusCheckRollup には CheckRun (name/status/conclusion) と
+    # StatusContext (context/state) の 2 typename が混在するため両方を吸収する。
+    ci_cur_hash=$(printf '%s' "$cur" | jq -c '[.statusCheckRollup[] | {
+        name:   (.name // .context),
+        status: (.status // null),
+        result: (.conclusion // .state // null)
+    }]' 2>/dev/null | sha256sum | cut -d" " -f1)
 
     # 新規コメント emit（2 周目以降のみ）
     if [ "$initialized" -eq 1 ] && [ -n "$cur_max_comment_at" ] && [ "$cur_max_comment_at" \> "$max_comment_at" ]; then
@@ -100,9 +105,13 @@ while true; do
     fi
 
     # CI 変化時だけ [CI] emit（初回は ci_hash="" で抑止）
+    # name/status/conclusion は CheckRun, context/state は StatusContext 用
     if [ "$ci_cur_hash" != "$ci_hash" ] && [ -n "$ci_hash" ]; then
         printf '%s' "$cur" | jq -r '
-            "[CI] " + ([.statusCheckRollup[] | "\(.name)=\(.conclusion // .status)"] | join(", "))
+            "[CI] " + ([.statusCheckRollup[] |
+                ((.name // .context // "unknown") + "=" +
+                 ((.conclusion // .state // .status // "PENDING") | tostring))
+            ] | join(", "))
         ' 2>/dev/null
     fi
 
