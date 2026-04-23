@@ -37,6 +37,16 @@ if ! printf '%s' "$pr" | grep -Eq '^[1-9][0-9]*$'; then
     exit 2
 fi
 
+# interval / fail_warn が正の整数でなければ既定値にフォールバック
+if ! printf '%s' "$interval" | grep -Eq '^[1-9][0-9]*$'; then
+    echo "[WARN] invalid PR_WATCH_INTERVAL='$interval' → fallback to 60"
+    interval=60
+fi
+if ! printf '%s' "$fail_warn" | grep -Eq '^[1-9][0-9]*$'; then
+    echo "[WARN] invalid PR_WATCH_FAIL_WARN='$fail_warn' → fallback to 5"
+    fail_warn=5
+fi
+
 ci_hash=""                  # statusCheckRollup 用ハッシュ
 max_comment_at=""           # 既出コメントの最大 createdAt
 max_review_at=""            # 既出レビューの最大 submittedAt
