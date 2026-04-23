@@ -1,27 +1,81 @@
 {
   "skill_name": "pr-watch",
-  "_comment": "skill-creator プロセス用テストケース雛形。iteration-1 で実際のプロンプトを入れて実行する。",
+  "_comment": "skill-creator 評価プロセス用テストケース。各 eval は Claude が pr-watch スキルを起動すべきか/起動しないべきかを判断する能力を確認する。",
   "evals": [
     {
       "id": 1,
       "name": "explicit-request-with-pr-number",
-      "prompt": "PR #2108 のレビューとCIの状態変化を監視して、新しいコメントや承認が来たら教えて。今は別の作業をしているので、変化があった時だけ通知してくれればいい。リポジトリは emeradaco/antenna ね。",
-      "expected_output": "pr-watch スキルをトリガーして Monitor ツールで pr-watch.sh を起動し、変化時のみ通知する旨を報告する。",
-      "files": []
+      "prompt": "PR #2108 のレビューと CI の状態変化を監視して、新しいコメントや承認が来たら教えて。今は別の作業をしているので、変化があった時だけ通知してくれればいい。リポジトリは emeradaco/antenna ね。",
+      "expected_behavior": [
+        "TaskList を確認して pr-watch が重複起動しないことを確認する",
+        "Monitor ツールで scripts/pr-watch.sh を emeradaco/antenna 2108 を引数として起動する",
+        "description は 'PR emeradaco/antenna#2108 監視' 相当",
+        "persistent: true で起動する",
+        "ユーザに '監視を開始しました' 的な短い報告をする"
+      ]
     },
     {
       "id": 2,
       "name": "implicit-from-push",
-      "prompt": "今 PR をプッシュしたんだけど、CIが通ってレビューが終わったら Slack に貼るやつ書きたいから、それまで他の作業してるね。状態変わったら教えて。",
-      "expected_output": "現在の worktree のブランチから detect-pr.sh で PR を検出し、pr-watch スキルで監視起動。ユーザーは PR 番号を言わないが AI が自律判断。",
-      "files": []
+      "prompt": "今 PR をプッシュしたんだけど、CI が通ってレビューが終わったら Slack に貼るやつ書きたいから、それまで他の作業してるね。状態変わったら教えて。",
+      "expected_behavior": [
+        "現在の worktree のブランチから scripts/detect-pr.sh で PR を検出する",
+        "検出に成功したら pr-watch スキルを起動する",
+        "ユーザは PR 番号を言わないが AI が自律判断で検出 → 起動までやる",
+        "検出に失敗した場合は 'この worktree には open PR がありません' と報告"
+      ]
     },
     {
       "id": 3,
       "name": "no-pr-on-current-branch",
-      "prompt": "CIどうなった？",
-      "expected_output": "現ブランチに open PR が無いケース。detect-pr.sh が exit 1 を返すので、pr-watch を起動せずに 'この worktree には PR がないようです' と報告。",
-      "files": []
+      "prompt": "CI どうなった？",
+      "expected_behavior": [
+        "scripts/detect-pr.sh を実行し exit 1 が返る（PR なし）",
+        "pr-watch を起動せず、'この worktree には open PR がないようです' と報告",
+        "代案として 'PR 番号を指定してもらえれば起動できる' と提案してもよい"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "already-watching-avoid-duplicate",
+      "prompt": "さっきの PR どうなったか監視お願い。",
+      "context": "直前に同じ PR の pr-watch Monitor が既に起動済み（TaskList で 'PR X/Y#N 監視' の description を持つ task が active）。",
+      "expected_behavior": [
+        "TaskList を確認して既存の pr-watch タスクを検出する",
+        "追加で起動せず、'既に監視中です' と報告する",
+        "新しい監視を作る誘惑に負けない"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "multi-pr-request",
+      "prompt": "この worktree の PR と、あと PR #2108 emeradaco/antenna も両方監視して。",
+      "expected_behavior": [
+        "検出した現 worktree の PR と、明示指定の #2108 で 2 つ独立して Monitor を起動する",
+        "それぞれ description を 'PR owner/repo#N 監視' で区別する",
+        "既存の監視がある場合はその分だけ skip する（全 skip ではない）"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "stop-watching-explicit",
+      "prompt": "もう監視止めて、集中したいから。",
+      "expected_behavior": [
+        "TaskList で pr-watch 系の Monitor タスクを探す",
+        "該当する全ての Monitor タスクに TaskStop を呼ぶ",
+        "結果を短く報告する ('監視を停止しました')"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "pr-closed-naturally",
+      "context": "pr-watch が監視中の PR が merged され、Monitor から '[MERGED] at 2026-04-23T02:00:00Z - watch ends' が届いた状況。",
+      "prompt": "（監視行が Monitor から届いた）",
+      "expected_behavior": [
+        "'PR がマージされました' とユーザに報告する",
+        "スクリプトは exit 0 で自然終了するので追加の停止処理は不要",
+        "後続の next-action（次の PR への切替など）があればそれを提案"
+      ]
     }
   ]
 }
