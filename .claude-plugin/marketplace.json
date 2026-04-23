@@ -1,0 +1,17 @@
+{
+  "name": "claude-pr-monitor",
+  "owner": {
+    "name": "kawaz"
+  },
+  "metadata": {
+    "description": "Monitor GitHub PR state changes (comments / reviews / CI / merge) via a SessionStart hook + Monitor tool.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "pr-monitor",
+      "source": "./",
+      "description": "GitHub PR state monitor — emits a line on each comment / review / CI / merge change so Claude Code can notify you without polling."
+    }
+  ]
+}
