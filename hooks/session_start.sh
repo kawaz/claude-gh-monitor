@@ -11,8 +11,15 @@
 
 set -u
 
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+# Plugin root の解決:
+# - plugin 経由で呼ばれた場合は CLAUDE_PLUGIN_ROOT が設定される
+# - そうでない場合（手動実行/テスト）は script の位置から逆算
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    REPO_ROOT="$CLAUDE_PLUGIN_ROOT"
+else
+    SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+    REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+fi
 
 # 作業ディレクトリ (CLAUDE_PROJECT_DIR 優先)
 workdir=${CLAUDE_PROJECT_DIR:-$(pwd)}
