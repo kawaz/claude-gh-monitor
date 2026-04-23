@@ -20,14 +20,14 @@
 
 1. `main/README.md` — プロジェクト概要
 2. **`main/docs/DESIGN.md` ← 完全なコンテキスト共有ドキュメント。必ず最初に通読すること**
-3. `main/skills/pr-watch/SKILL.md` — 現在の SKILL.md draft
-4. `main/scripts/pr-watch.sh`, `main/scripts/detect-pr.sh`, `main/hooks/session_start.sh` — 実装雛形
+3. `main/skills/pr-monitor/SKILL.md` — 現在の SKILL.md draft
+4. `main/scripts/pr-monitor.sh`, `main/scripts/detect-pr.sh`, `main/hooks/session_start.sh` — 実装雛形
 5. `main/evals/evals.json` — テストケース雛形
 6. `main/settings.json.sample` — .claude/settings.json 統合例
 
 ## あなたのミッション
 
-skill-creator の標準プロセスに従って `pr-watch` スキルを本番品質まで仕上げる:
+skill-creator の標準プロセスに従って `pr-monitor` スキルを本番品質まで仕上げる:
 
 1. `docs/DESIGN.md` の「5. 未着手・検討が必要な点」を上から順に片付ける
    - (A) skill-creator プロセスの完走（draft の精査 → テストケース → iterate）
@@ -42,7 +42,7 @@ skill-creator の標準プロセスに従って `pr-watch` スキルを本番品
 ## 実運用検証中の PR（並行確認に使える）
 
 - https://github.com/emeradaco/antenna/pull/2108 （`security(log): MONGO_URI ログ出力のパスワード漏洩対策`）
-- このリポの `pr-watch.sh` の素の版（ベタ打ち）が antenna セッションの Monitor で稼働中
+- このリポの `pr-monitor.sh` の素の版（ベタ打ち）が antenna セッションの Monitor で稼働中
 - 実際に emit された通知内容を DESIGN.md のフィードバック材料として活用可
 
 ## 制約・前提

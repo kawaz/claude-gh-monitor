@@ -1,4 +1,4 @@
-# pr-watch.sh の emit 形式 dry-run
+# pr-monitor.sh の emit 形式 dry-run
 
 ## 判明した事実
 
@@ -10,7 +10,7 @@
 
 ## 実用的な示唆
 
-- 現行 pr-watch.sh は仕様通りの emit を出せる。実運用の PR にそのまま投入可能
+- 現行 pr-monitor.sh は仕様通りの emit を出せる。実運用の PR にそのまま投入可能
 - 将来 `check_run` の URL までリンクしたい場合は jq 展開を拡張するだけで済む（構造は保てている）
 - 既存 antenna セッション側の Monitor 出力は、本セッションから直接観察することができない（Claude Code の Monitor 機構はセッション境界を跨がないため）。代わりに本 dry-run で emit 仕様を確定させた
 
@@ -36,7 +36,7 @@
 }
 ```
 
-`last_check_time = 2026-04-23T09:30:00Z` として pr-watch.sh の jq 部を個別実行した。
+`last_check_time = 2026-04-23T09:30:00Z` として pr-monitor.sh の jq 部を個別実行した。
 
 ### 出力
 

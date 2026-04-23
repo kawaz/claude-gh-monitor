@@ -39,7 +39,7 @@
 
 | # | 項目 | 決定内容 |
 |---|---|---|
-| 1 | 起動形態 | **SessionStart hook** で自動起動（手動 `/pr-watch` スキルも提供） |
+| 1 | 起動形態 | **SessionStart hook** で自動起動（手動 `/pr-monitor` スキルも提供） |
 | 2 | 監視項目 | 新規コメント / レビュー state変化 / CI state変化 / PR state (open/closed/merged) |
 | 3 | セッション間の干渉 | **(A) 各セッション独立**（Bash で 1プロセス ~2MB なのでロック機構は不要） |
 | 4 | 終了条件 | **セッション終了時**（= 基本常時稼働）。PR merged / closed でもスクリプト側で exit 0 |
@@ -75,7 +75,7 @@
 [stdout に Monitor 起動指示を出す] ← Claude 本体が見て Monitor 起動
         │
         ▼
-[Monitor ツール] で [scripts/pr-watch.sh] を常駐起動
+[Monitor ツール] で [scripts/pr-monitor.sh] を常駐起動
         │
         ▼ 60s ごと
 [gh pr view ... --json] → [jq でハッシュ化して前回と比較]
@@ -94,8 +94,8 @@
 |---|---|
 | `hooks/session_start.sh` | SessionStart hook。PR 検出 → Monitor 起動指示を stdout に出す |
 | `scripts/detect-pr.sh` | カレントブランチから open PR を検出。`OWNER/REPO\tPR_NUMBER` を出す |
-| `scripts/pr-watch.sh` | Monitor 対象本体。60s ごとに `gh pr view` し、変化時のみ 1 行 emit |
-| `skills/pr-watch/SKILL.md` | 手動起動用のスキル定義。AI が判断して呼ぶ |
+| `scripts/pr-monitor.sh` | Monitor 対象本体。60s ごとに `gh pr view` し、変化時のみ 1 行 emit |
+| `skills/pr-monitor/SKILL.md` | 手動起動用のスキル定義。AI が判断して呼ぶ |
 | `settings.json.sample` | `.claude/settings.json` への組み込みサンプル |
 
 ### スクリプト間の責任分担
@@ -103,7 +103,7 @@
 - **hook は指示を出すだけ**。Monitor 起動は Claude Code 本体が SessionStart hook の出力を読んで実行する想定
   - 理由: hook が子プロセスとして Monitor を起動すると、hook 終了時にそのプロセスの寿命管理が曖昧になる
   - Monitor ツール経由で起動させることで「セッションの一部」として正しくライフサイクル管理される
-- **pr-watch.sh は差分検出と emit だけ**。重複起動防止は上位層（Monitor）の責務
+- **pr-monitor.sh は差分検出と emit だけ**。重複起動防止は上位層（Monitor）の責務
 
 ---
 
@@ -149,7 +149,7 @@
 
 ### (B) SessionStart hook ✅ 改修済み
 
-- hook 出力は「pr-watch スキルを起動してほしい」という明示指示に構造化
+- hook 出力は「pr-monitor スキルを起動してほしい」という明示指示に構造化
 - 起動引数・重複防止方法を箇条書きで提示し Claude が読み取りやすい形に
 - 実際の Claude 受け取り挙動は実運用セッションで継続観察
 
@@ -188,7 +188,7 @@
 ### このドキュメントが書かれた時点の状況
 
 - 発案元セッション: antenna リポジトリで PR #2108 (`security(log): MONGO_URI ログ出力のパスワード漏洩対策`) のレビュー待ち
-- そこで pr-watch.sh を antenna セッションの Monitor で稼働させて動作確認中
+- そこで pr-monitor.sh を antenna セッションの Monitor で稼働させて動作確認中
 - 同じ仕組みを汎用化して本プロジェクトに切り出す流れ
 
 ### 本プロジェクトの由来 PR (動作検証中)
