@@ -25,9 +25,22 @@ if [ -z "$repo" ] || [ -z "$pr" ]; then
     exit 2
 fi
 
-pr_hash=""          # state / comments / reviews 用
-ci_hash=""          # statusCheckRollup 用
-last_check_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+# OWNER/REPO の形式検証（GitHub の owner/repo は英数 / "_" / "-" / "." のみ）
+if ! printf '%s' "$repo" | grep -Eq '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'; then
+    echo "[ERROR] invalid OWNER/REPO: $repo" >&2
+    exit 2
+fi
+
+# PR_NUMBER は正の整数
+if ! printf '%s' "$pr" | grep -Eq '^[1-9][0-9]*$'; then
+    echo "[ERROR] invalid PR_NUMBER: $pr" >&2
+    exit 2
+fi
+
+ci_hash=""                  # statusCheckRollup 用ハッシュ
+max_comment_at=""           # 既出コメントの最大 createdAt
+max_review_at=""            # 既出レビューの最大 submittedAt
+initialized=0               # 初回ループフラグ（初回は emit しない）
 fail_count=0
 warned_fail=0
 
@@ -51,32 +64,32 @@ while true; do
     fail_count=0
     warned_fail=0
 
-    # PR 本体側（state/comments/reviews）のハッシュ
-    pr_cur_hash=$(printf '%s' "$cur" | jq -c '{
-        state, mergedAt,
-        comments: [.comments[] | {createdAt, a:.author.login}],
-        reviews:  [.reviews[]  | {state, a:.author.login, submittedAt}]
-    }' 2>/dev/null | sha256sum | cut -d" " -f1)
+    # 今回取得データの最大 createdAt / submittedAt
+    cur_max_comment_at=$(printf '%s' "$cur" | jq -r '[.comments[].createdAt] | max // ""' 2>/dev/null)
+    cur_max_review_at=$(printf '%s' "$cur"  | jq -r '[.reviews[].submittedAt | select(. != null)] | max // ""' 2>/dev/null)
 
     # CI 側のハッシュ（独立管理）
     ci_cur_hash=$(printf '%s' "$cur" | jq -c '[.statusCheckRollup[] | {name, status, conclusion}]' \
         2>/dev/null | sha256sum | cut -d" " -f1)
 
-    # 新規コメント / 新規レビューの emit（初回は pr_hash="" なので抑止）
-    if [ "$pr_cur_hash" != "$pr_hash" ] && [ -n "$pr_hash" ]; then
-        printf '%s' "$cur" | jq -r --arg t "$last_check_time" '
+    # 新規コメント emit（2 周目以降のみ）
+    if [ "$initialized" -eq 1 ] && [ -n "$cur_max_comment_at" ] && [ "$cur_max_comment_at" \> "$max_comment_at" ]; then
+        printf '%s' "$cur" | jq -r --arg t "$max_comment_at" '
             .comments[] | select(.createdAt > $t) |
             "[COMMENT by \(.author.login)] " +
             (.body | .[0:200] | gsub("\n"; " "))
         ' 2>/dev/null
+    fi
 
-        printf '%s' "$cur" | jq -r --arg t "$last_check_time" '
+    # 新規レビュー emit（2 周目以降のみ）
+    if [ "$initialized" -eq 1 ] && [ -n "$cur_max_review_at" ] && [ "$cur_max_review_at" \> "$max_review_at" ]; then
+        printf '%s' "$cur" | jq -r --arg t "$max_review_at" '
             .reviews[] | select(.submittedAt != null) | select(.submittedAt > $t) |
             "[REVIEW \(.state) by \(.author.login)]"
         ' 2>/dev/null
     fi
 
-    # CI 変化時だけ [CI] を emit（初回は ci_hash="" なので抑止）
+    # CI 変化時だけ [CI] emit（初回は ci_hash="" で抑止）
     if [ "$ci_cur_hash" != "$ci_hash" ] && [ -n "$ci_hash" ]; then
         printf '%s' "$cur" | jq -r '
             "[CI] " + ([.statusCheckRollup[] | "\(.name)=\(.conclusion // .status)"] | join(", "))
@@ -93,8 +106,10 @@ while true; do
         exit 0
     fi
 
-    pr_hash="$pr_cur_hash"
     ci_hash="$ci_cur_hash"
-    last_check_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    # 最大値は「増加したら更新」。同値/空のままで維持されるケースもある
+    [ -n "$cur_max_comment_at" ] && max_comment_at="$cur_max_comment_at"
+    [ -n "$cur_max_review_at" ]  && max_review_at="$cur_max_review_at"
+    initialized=1
     sleep "$interval"
 done
