@@ -39,7 +39,7 @@
 
 | # | 項目 | 決定内容 |
 |---|---|---|
-| 1 | 配布形態 | **Claude Code Plugin**（`.claude-plugin/` + `marketplace.json`）。`claude plugin install pr-monitor@claude-pr-monitor` でインストール |
+| 1 | 配布形態 | **Claude Code Plugin**（`.claude-plugin/` + `marketplace.json`）。`claude plugin install pr-monitor@pr-monitor` でインストール |
 | 2 | 起動形態 | **SessionStart hook** (`startup` + `resume` matcher) で自動起動。手動起動も可 |
 | 3 | 監視項目 | 新規コメント / レビュー state変化 / CI state変化 / PR state (open/closed/merged) |
 | 4 | セッション間の干渉 | **(A) 各セッション独立**（Bash で 1プロセス ~2MB なのでロック機構は不要） |
@@ -170,7 +170,7 @@
 ### (E) 設定ファイル配布 ✅ Plugin 化で解決
 
 - Claude Code plugin 化 (`.claude-plugin/plugin.json` + `marketplace.json`) により
-  `claude plugin install pr-monitor@claude-pr-monitor` 1 発でデプロイ可能に
+  `claude plugin install pr-monitor@pr-monitor` 1 発でデプロイ可能に
 - `hooks/hooks.json` が SessionStart hook を自動登録するので、ユーザが
   `~/.claude/settings.json` を手動編集する必要が無くなった
 - 前提（gh / jq / gh auth）は README 冒頭に記述

@@ -1,7 +1,7 @@
 {
   "name": "pr-monitor",
   "description": "Monitor GitHub PR state changes (comments / reviews / CI / merge) via a SessionStart hook + Monitor tool. Emits a single line per change so Claude Code can notify you without polling.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": {
     "name": "kawaz"
   },

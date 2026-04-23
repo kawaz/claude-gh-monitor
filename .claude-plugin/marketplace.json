@@ -1,11 +1,11 @@
 {
-  "name": "claude-pr-monitor",
+  "name": "pr-monitor",
   "owner": {
     "name": "kawaz"
   },
   "metadata": {
     "description": "Monitor GitHub PR state changes (comments / reviews / CI / merge) via a SessionStart hook + Monitor tool.",
-    "version": "0.1.1"
+    "version": "0.1.2"
   },
   "plugins": [
     {
