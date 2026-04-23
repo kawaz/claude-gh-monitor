@@ -21,6 +21,12 @@ Claude Code skill for PR state monitoring via SessionStart hook.
 
 - [GitHub CLI (`gh`)](https://cli.github.com/) と `jq` がインストール済み
 - `gh auth login` で対象リポジトリを読める権限で認証済み
+
+  ```bash
+  gh auth status      # 現在の認証状態
+  gh auth login       # 未認証なら対話形式で登録
+  ```
+
 - Claude Code 本体が Monitor ツールを利用可能（特にバージョン制約なし）
 - git もしくは jj workspace 方式のリポジトリ配下で作業
 
@@ -59,12 +65,14 @@ git clone https://github.com/kawaz/claude-pr-monitor.git
 
 ### 4. スキルを有効化
 
-`~/.claude/skills/` からシンボリックリンクを張るか、Claude Code の skill 設定でスキル検索パスに `skills/` を追加。
+Claude Code は `~/.claude/skills/<skill-name>/SKILL.md` を自動で検出するため、シンボリックリンクを張るのが最も簡単:
 
 ```bash
 mkdir -p ~/.claude/skills
 ln -sf ~/.local/share/repos/github.com/kawaz/claude-pr-monitor/main/skills/pr-watch ~/.claude/skills/pr-watch
 ```
+
+プロジェクト固有にしたい場合は `.claude/skills/pr-watch` にリンクを張る。
 
 ## 使い方
 
