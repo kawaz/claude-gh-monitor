@@ -1,0 +1,12 @@
+{
+  "_comment": "claude-pr-monitor を有効化するための .claude/settings.json 断片サンプル。プロジェクトの settings.json に統合してください。",
+
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "bash ${HOME}/.local/share/repos/github.com/kawaz/claude-pr-monitor/main/hooks/session_start.sh"
+      }
+    ]
+  }
+}

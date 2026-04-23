@@ -1,0 +1,17 @@
+# Editor / OS
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Claude Code 内部 state
+.claude/logs/
+.claude-backups/
+
+# 一時物
+/tmp/
+*.log
+
+# dev
+node_modules/

@@ -1,0 +1,27 @@
+{
+  "skill_name": "pr-watch",
+  "_comment": "skill-creator プロセス用テストケース雛形。iteration-1 で実際のプロンプトを入れて実行する。",
+  "evals": [
+    {
+      "id": 1,
+      "name": "explicit-request-with-pr-number",
+      "prompt": "PR #2108 のレビューとCIの状態変化を監視して、新しいコメントや承認が来たら教えて。今は別の作業をしているので、変化があった時だけ通知してくれればいい。リポジトリは emeradaco/antenna ね。",
+      "expected_output": "pr-watch スキルをトリガーして Monitor ツールで pr-watch.sh を起動し、変化時のみ通知する旨を報告する。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "implicit-from-push",
+      "prompt": "今 PR をプッシュしたんだけど、CIが通ってレビューが終わったら Slack に貼るやつ書きたいから、それまで他の作業してるね。状態変わったら教えて。",
+      "expected_output": "現在の worktree のブランチから detect-pr.sh で PR を検出し、pr-watch スキルで監視起動。ユーザーは PR 番号を言わないが AI が自律判断。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "no-pr-on-current-branch",
+      "prompt": "CIどうなった？",
+      "expected_output": "現ブランチに open PR が無いケース。detect-pr.sh が exit 1 を返すので、pr-watch を起動せずに 'この worktree には PR がないようです' と報告。",
+      "files": []
+    }
+  ]
+}
