@@ -1,12 +1,12 @@
-# DR-0003: workflow-watch は repo 単位の常駐 Monitor 1 本
+# DR-0003: watch-workflow は repo 単位の常駐 Monitor 1 本
 
 - ステータス: Accepted
 - 日付: 2026-05-25
-- 関連: DR-0001 (改名 + スコープ拡大), DR-0002 (hook 出力最小化), `scripts/workflow-watch.sh` (新規予定), `hooks/hooks.json`
+- 関連: DR-0001 (改名 + スコープ拡大), DR-0002 (hook 出力最小化), `scripts/watch-workflow.sh` (新規予定), `hooks/hooks.json`
 
 ## 文脈
 
-新規 `workflow-watch` 機能の実装にあたり、起動戦略に複数の選択肢がある:
+新規 `watch-workflow` 機能の実装にあたり、起動戦略に複数の選択肢がある:
 
 | 案 | 戦略 |
 |----|------|
@@ -18,10 +18,10 @@ push 検出のトリガとして PostToolUse hook を使うこと、Monitor の 
 
 ## 決定
 
-**`workflow-watch` は repo 単位の常駐 Monitor 1 本にする (案 β)。**
+**`watch-workflow` は repo 単位の常駐 Monitor 1 本にする (案 β)。**
 
-- 重複キー: Monitor description = `workflow-watch: <user/repo>`
-- 起動コマンド: `command: workflow-watch.sh <user/repo>`, `persistent: true`
+- 重複キー: Monitor description = `watch-workflow: <user/repo>`
+- 起動コマンド: `command: watch-workflow.sh <user/repo>`, `persistent: true`
 - トリガ: **PostToolUse hook での push 検出** (SessionStart 案 γ は不採用、後述)。hook は plain stdout ではなく JSON の `hookSpecificOutput.additionalContext` に Monitor 起動指示を載せて返す ([DR-0002](./DR-0002-hook-minimal-output.md) 参照)
 - 動作: スクリプトはその repo の workflow run を継続 poll し、状態変化を 1 行で emit し続ける
 
@@ -87,12 +87,12 @@ workflow hook には `detect-pr.sh` 相当の補助がない。初期実装は *
 
 `git -C <別repo> push` / `cd <別repo> && git push` / 別 remote への push などは誤検出・取りこぼしの可能性があるが、ブロックしない以上 害は軽微。次セッション以降で「push コマンド文字列から cwd / remote を解決すべきか」を判断する余地は残す。
 
-## emit フォーマット (workflow-watch)
+## emit フォーマット (watch-workflow)
 
 軽量 1 行:
 
 ```
-[workflow-watch] workflow:ci.yml id:12345678 status:failure commit:abc1234 user:kawaz branch:main
+[watch-workflow] workflow:ci.yml id:12345678 status:failure commit:abc1234 user:kawaz branch:main
 ```
 
 - `status` の語彙は **gh 準拠**: workflow run の `status` (`queued` / `in_progress` / `completed`) と、`completed` 時の `conclusion` (`success` / `failure` / `cancelled` / `skipped` / `timed_out` / `action_required` 等) をフラット化した 1 語として出す

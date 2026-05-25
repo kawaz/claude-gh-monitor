@@ -1,4 +1,4 @@
-# Claude Code Plugin: pr-monitor
+# Claude Code Plugin: gh-monitor
 
 default:
     @just --list

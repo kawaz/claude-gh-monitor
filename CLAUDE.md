@@ -1,22 +1,27 @@
-# Claude Code Plugin: pr-monitor
+# Claude Code Plugin: gh-monitor
 
 ## 概要
 
-- ブランチに紐づく GitHub PR の状態変化（コメント / レビュー / CI / マージ）を Monitor ツール経由で通知
-- SessionStart hook で PR を検出し、Claude に skill 起動を促す
+GitHub の非同期イベント（PR の状態変化 + GitHub Actions workflow run）を Claude Code の Monitor ツール経由で低コンテキストに通知する。
+
+実装機能:
+
+- **watch-pr**: ブランチに紐づく GitHub PR の状態変化（コメント / レビュー / CI / マージ）。SessionStart hook で PR を検出して skill 起動を促す
+- **watch-workflow**: GitHub Actions workflow run の start / success / failure 等。PostToolUse hook で push を検出して skill 起動を促す (実装予定、[DR-0003](docs/decisions/DR-0003-watch-workflow-persistent-per-repo.md))
 
 ## 3-layer 構造
 
-| Layer | Files | Role |
-|-------|-------|------|
-| Hook | `hooks/hooks.json` + `hooks/session_start.sh` | SessionStart で PR を検出し Claude に起動指示を出す |
-| Skill | `skills/pr-monitor/SKILL.md` | Monitor 起動時の引数 / 通知行の意味 / 重複防止手順 |
-| Scripts | `scripts/pr-monitor.sh` / `scripts/detect-pr.sh` | 実ロジック（Bash + gh + jq） |
+| Layer | watch-pr | watch-workflow (予定) |
+|-------|----------|----------------------|
+| Hook | `hooks/hooks.json` + `hooks/session_start.sh` | PostToolUse hook (`hooks/hooks.json` に追加予定) |
+| Skill | `skills/watch-pr/SKILL.md` | (未実装) |
+| Scripts | `scripts/watch-pr.sh` / `scripts/detect-pr.sh` | `scripts/watch-workflow.sh` (未実装) |
 
 ## 設計原則
 
-- **Hook は指示だけ、Monitor 起動は Claude の仕事**: hook で直接常駐プロセスを起こさない
+- **Hook は最小指示だけ、Monitor 起動は Claude の仕事**: hook で直接常駐プロセスを起こさない（[DR-0002](docs/decisions/DR-0002-hook-minimal-output.md)）
 - **変化時のみ emit**: PR 全体ハッシュと CI ハッシュを独立管理し、不要な再通知を抑止
+- **repo 単位の常駐 Monitor**: watch-workflow は 1 repo = 1 Monitor で push ごとに増殖させない（[DR-0003](docs/decisions/DR-0003-watch-workflow-persistent-per-repo.md)）
 - **軽量**: Bash + gh + jq のみ。1 プロセス ~2MB
 
 ## 開発
@@ -30,4 +35,4 @@ just push             # バージョン一致 + validate + lint + push
 just push-without-bump
 ```
 
-詳細設計は [docs/DESIGN.md](docs/DESIGN.md) を参照。
+詳細設計は [docs/DESIGN.md](docs/DESIGN.md)、設計判断は [docs/decisions/INDEX.md](docs/decisions/INDEX.md) を参照。

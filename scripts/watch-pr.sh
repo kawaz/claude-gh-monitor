@@ -3,11 +3,7 @@
 # Claude Code の Monitor ツールで常駐させる前提。
 #
 # Usage:
-#   pr-monitor.sh <OWNER/REPO> <PR_NUMBER>
-#
-# Env:
-#   PR_MONITOR_INTERVAL   ポーリング間隔(秒)  default=60
-#   PR_MONITOR_FAIL_WARN  連続失敗通知閾値    default=5
+#   watch-pr.sh <OWNER/REPO> <PR_NUMBER>
 #
 # 終了条件:
 #   - PR が merged / closed → exit 0
@@ -17,8 +13,8 @@ set -u
 
 repo=${1:-}
 pr=${2:-}
-interval=${PR_MONITOR_INTERVAL:-60}
-fail_warn=${PR_MONITOR_FAIL_WARN:-5}
+interval=60       # ポーリング間隔(秒)
+fail_warn=5       # 連続失敗通知閾値
 
 if [ -z "$repo" ] || [ -z "$pr" ]; then
     echo "[ERROR] usage: $0 <OWNER/REPO> <PR_NUMBER>" >&2
@@ -35,16 +31,6 @@ fi
 if ! printf '%s' "$pr" | grep -Eq '^[1-9][0-9]*$'; then
     echo "[ERROR] invalid PR_NUMBER: $pr" >&2
     exit 2
-fi
-
-# interval / fail_warn が正の整数でなければ既定値にフォールバック
-if ! printf '%s' "$interval" | grep -Eq '^[1-9][0-9]*$'; then
-    echo "[WARN] invalid PR_MONITOR_INTERVAL='$interval' → fallback to 60"
-    interval=60
-fi
-if ! printf '%s' "$fail_warn" | grep -Eq '^[1-9][0-9]*$'; then
-    echo "[WARN] invalid PR_MONITOR_FAIL_WARN='$fail_warn' → fallback to 5"
-    fail_warn=5
 fi
 
 ci_hash=""                  # statusCheckRollup 用ハッシュ

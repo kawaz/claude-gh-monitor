@@ -2,7 +2,7 @@
 
 - ステータス: Accepted
 - 日付: 2026-05-25
-- 関連: DR-0002 (hook 出力最小化), DR-0003 (workflow-watch 常駐 Monitor), `docs/DESIGN.md`
+- 関連: DR-0002 (hook 出力最小化), DR-0003 (watch-workflow 常駐 Monitor), `docs/DESIGN.md`
 
 ## 文脈
 
@@ -20,8 +20,8 @@
 
 | 機能 | 役割 |
 |------|------|
-| `pr-watch` | 旧 `pr-monitor` 相当 (PR の状態変化監視)。中身はほぼ流用 |
-| `workflow-watch` | 新規。GitHub Actions の workflow run の start/success/failure 等を低コンテキストで通知 |
+| `watch-pr` | 旧 `pr-monitor` 相当 (PR の状態変化監視)。中身はほぼ流用 |
+| `watch-workflow` | 新規。GitHub Actions の workflow run の start/success/failure 等を低コンテキストで通知 |
 
 両機能の抽象は揃っており「GitHub の非同期イベントを Monitor で低コンテキスト通知する」で 1 つのプラグインに束ねられる。`gh-monitor` は 2 機能を束ねる中立名。
 
@@ -41,7 +41,7 @@
 
 3-layer 構成 (hook / skill / scripts) が完全に重複する。Monitor 起動の重複防止規約 (description = `<feature>: <key>`) も共通化されないため、運用面で 2 つのプラグインを別個に意識する必要が出る。
 
-### C. PR 監視を捨てて `workflow-watch` 専用プラグインにする
+### C. PR 監視を捨てて `watch-workflow` 専用プラグインにする
 
 業務リポ (Issue/PR を実際に立てる環境) では PR 監視も価値がある。個人専用に切り詰めると業務リポ共用の余地を失う。
 
@@ -52,15 +52,15 @@
 3. 改名作業 (`pr-monitor` 文字列は全体で 76 箇所程度):
    - `.claude-plugin/plugin.json` / `marketplace.json` の `name` / `homepage` / `repository`
    - `skills/pr-monitor/` → 改名 (skill 構成は未決論点、後述)
-   - `scripts/pr-monitor.sh` → `scripts/pr-watch.sh`
+   - `scripts/pr-monitor.sh` → `scripts/watch-pr.sh`
    - `hooks/session_start.sh` の注入メッセージ・prefix `[claude-pr-monitor]` → `[gh-monitor]` 等
    - README / DESIGN / CLAUDE.md / CHANGELOG / findings/ の記述
-4. `workflow-watch` 実装: `scripts/workflow-watch.sh` + workflow 監視 skill + PostToolUse hook (`hooks/hooks.json` に追加)
+4. `watch-workflow` 実装: `scripts/watch-workflow.sh` + workflow 監視 skill + PostToolUse hook (`hooks/hooks.json` に追加)
 5. `docs/issue/` の 2 件 (justfile/CI/dependabot 移行、docs-structure 移行) を棚卸し
 
 ## 未決の論点
 
-- **skill を何本にするか**: `pr-watch` と `workflow-watch` の skill を分けるか、`gh-monitor` skill 1 本にサブ機能としてまとめるか
+- **skill を何本にするか**: `watch-pr` と `watch-workflow` の skill を分けるか、`gh-monitor` skill 1 本にサブ機能としてまとめるか
 - **手動起動用 invocable skill**: `/gh-monitor:watch-ci` のように明示起動できる skill を用意するか (push トリガとは別の手動起動経路)
 
 いずれも次セッション冒頭で確定させる。
@@ -68,6 +68,6 @@
 ## 関連
 
 - DR-0002: hook 出力を最小化する設計判断
-- DR-0003: workflow-watch を repo 単位の常駐 Monitor 1 本にする判断
+- DR-0003: watch-workflow を repo 単位の常駐 Monitor 1 本にする判断
 - `docs/DESIGN.md`: 3-layer 構成の説明 (改名時に同期更新)
 - `~/.claude/rules/push-workflow.md`: push 後の CI watch を必須化する個人ルール (本 DR の動機の 1 つ)

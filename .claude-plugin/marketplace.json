@@ -1,17 +1,17 @@
 {
-  "name": "pr-monitor",
+  "name": "gh-monitor",
   "owner": {
     "name": "kawaz"
   },
   "metadata": {
-    "description": "Monitor GitHub PR state changes (comments / reviews / CI / merge) via a SessionStart hook + Monitor tool.",
+    "description": "Monitor GitHub asynchronous events (PR state changes, GitHub Actions workflow runs) via Claude Code hooks + Monitor tool.",
     "version": "0.1.2"
   },
   "plugins": [
     {
-      "name": "pr-monitor",
+      "name": "gh-monitor",
       "source": "./",
-      "description": "GitHub PR state monitor — emits a line on each comment / review / CI / merge change so Claude Code can notify you without polling."
+      "description": "GitHub asynchronous event monitor — emits a line on each PR / CI / workflow run change so Claude Code can notify you without polling."
     }
   ]
 }
