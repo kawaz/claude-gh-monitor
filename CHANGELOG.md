@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.3] - 2026-05-26
+
+### Added
+
+- `scripts/watch-pr.sh` / `scripts/watch-workflow.sh`: 自セッション (= 同じ gh authenticated user) 起因の comment / review / workflow run をデフォルト suppress ([DR-0004](docs/decisions/DR-0004-suppress-self-originated-events.md))。Claude 自身が `gh pr comment` 等で発火したイベントが echo されて余計な思考ターンを誘発するのを防ぐ。`GH_MONITOR_INCLUDE_SELF=1` で suppress off
+- `scripts/watch-pr.sh`: self-merge の `[pr:merge]` emit を抑制 (exit 0 は維持)
+- `tests/run-tests.sh`: gh コマンドを stub した self filter の smoke test を追加、`just test` / `just ci` で実行
+- `scripts/watch-pr.sh` / `scripts/watch-workflow.sh`: `WATCH_PR_INTERVAL` / `WATCH_WORKFLOW_INTERVAL` env でポーリング間隔を上書き可能に (主にテスト用、デバッグでも有用)
+
 ## [0.3.2] - 2026-05-26
 
 ### Security

@@ -12,9 +12,9 @@
 set -u
 
 repo=${1:-}
-interval=30          # poll 間隔(秒)
-lookback_min=5       # 起動時刻からの lookback (DR-0003)
-fail_warn=5          # 連続失敗通知閾値
+interval=${WATCH_WORKFLOW_INTERVAL:-30}    # poll 間隔(秒) — テスト等で env 上書き可
+lookback_min=5                              # 起動時刻からの lookback (DR-0003)
+fail_warn=5                                 # 連続失敗通知閾値
 
 if [ -z "$repo" ]; then
     echo "[ERROR] usage: $0 <OWNER/REPO>" >&2
@@ -34,7 +34,23 @@ initialized=0
 fail_count=0
 warned_fail=0
 
+# self filter (DR-0004): 起動時に gh authenticated user の login を 1 回取得し、
+# actor が一致する run の emit を抑制する。失敗時は filter 無効化 + WARN ログ。
+# GH_MONITOR_INCLUDE_SELF=1 で env から filter off。
+self_login=""
+if [ "${GH_MONITOR_INCLUDE_SELF:-0}" = "1" ]; then
+    :  # filter off
+else
+    self_login=$(gh api user --jq .login 2>/dev/null || true)
+    if [ -z "$self_login" ]; then
+        echo "[WARN] self login 取得失敗、self filter off で続行"
+    fi
+fi
+
 echo "[INFO] watch-workflow start: $repo (interval=${interval}s, lookback=${lookback_min}m)"
+if [ -n "$self_login" ]; then
+    printf '[INFO] self filter: login=%s\n' "$self_login"
+fi
 
 # 値にスペース・引用符・バックスラッシュ・改行を含む場合だけ double quote、
 # それ以外は素のまま。受信側 (Claude) が key:value を空白区切りで素朴に拾える形を保つ。
@@ -84,12 +100,20 @@ while true; do
     while IFS=$'\t' read -r rid rstate rname rsha rbranch ractor revent rupd_epoch; do
         [ -z "$rid" ] && continue
 
+        # self filter (DR-0004): actor が self_login と一致する run は emit 抑制
+        # (known_state には記録するので、後で他者が同 run を編集しても重複検出は維持)
+        is_self_run=0
+        if [ -n "$self_login" ] && [ "$ractor" = "$self_login" ]; then
+            is_self_run=1
+        fi
+
         if [ "$initialized" -eq 0 ]; then
             # baseline 構築
             if [ -z "${known_state[$rid]:-}" ]; then
                 known_state[$rid]=$rstate
                 # completed かつ cutoff より新しい run は即 emit (fast CI 救済)
-                if [ "$rupd_epoch" -ge "$cutoff_epoch" ] \
+                if [ "$is_self_run" -eq 0 ] \
+                    && [ "$rupd_epoch" -ge "$cutoff_epoch" ] \
                     && [ "$rstate" != "queued" ] \
                     && [ "$rstate" != "in_progress" ]; then
                     emit_run "$rname" "$rid" "$rstate" "$rsha" "$rbranch" "$ractor" "$revent"
@@ -100,10 +124,10 @@ while true; do
             if [ -z "$prev" ]; then
                 # 新規 run
                 known_state[$rid]=$rstate
-                emit_run "$rname" "$rid" "$rstate" "$rsha" "$rbranch" "$ractor" "$revent"
+                [ "$is_self_run" -eq 0 ] && emit_run "$rname" "$rid" "$rstate" "$rsha" "$rbranch" "$ractor" "$revent"
             elif [ "$prev" != "$rstate" ]; then
                 known_state[$rid]=$rstate
-                emit_run "$rname" "$rid" "$rstate" "$rsha" "$rbranch" "$ractor" "$revent"
+                [ "$is_self_run" -eq 0 ] && emit_run "$rname" "$rid" "$rstate" "$rsha" "$rbranch" "$ractor" "$revent"
             fi
         fi
     done < <(printf '%s' "$json" | jq -r '

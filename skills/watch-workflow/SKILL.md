@@ -86,11 +86,22 @@ skill 固有イベントの構造とは異質。payload は自然文 OK（KV 縛
 | イベント | 例 | アクション目安 |
 |---|---|---|
 | `[INFO] watch-workflow start: <repo> (interval=..., lookback=...)` | 起動 ack。設定値も含む | 黙殺 (起動確認用) |
+| `[INFO] self filter: login=<login>` | self filter ON、`<login>` 起因の run を suppress 中 (DR-0004) | 黙殺 |
 | `[INFO] gh api が復旧 (N 回失敗のあと)` | 障害復旧 | 通常は黙殺 |
+| `[WARN] self login 取得失敗、self filter off で続行` | `gh api user` 失敗。filter は off で続行 | gh 認証を要確認 |
 | `[WARN] gh api が N 回連続失敗` | gh 認証 / ネットワーク不調の可能性 | ユーザに要確認を促す |
 | `[ERROR] ...` | 致命的なエラー (実装上は usage error 等は stderr) | ユーザに報告 |
 
 監視起動の ack は出さない（Monitor description で起動は把握できる）。baseline 構築までは無出力。
+
+## 自セッション起因 run の suppress (DR-0004)
+
+`gh api user --jq .login` で取得した自 login と一致する run actor の `[run:change]` は **デフォルトで emit されません**。Claude 自身が `pkf run push` で発火した run の echo を抑制する目的です。
+
+- 起動行の直後に `[INFO] self filter: login=<login>` が 1 回 emit される
+- `known_state` には状態を記録するので、他者が同 run を再実行した場合の差分検出は維持される
+- `GH_MONITOR_INCLUDE_SELF=1` を Monitor 起動時の env に渡すと suppress off
+- 同じリリースが他者の dispatch で再実行された場合等は、actor がそちらに切り替わるので emit される
 
 ## 手動停止
 

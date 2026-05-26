@@ -13,8 +13,8 @@ set -u
 
 repo=${1:-}
 pr=${2:-}
-interval=60       # ポーリング間隔(秒)
-fail_warn=5       # 連続失敗通知閾値
+interval=${WATCH_PR_INTERVAL:-60}   # ポーリング間隔(秒) — テスト等で env 上書き可
+fail_warn=5                         # 連続失敗通知閾値
 
 if [ -z "$repo" ] || [ -z "$pr" ]; then
     echo "[ERROR] usage: $0 <OWNER/REPO> <PR_NUMBER>" >&2
@@ -60,7 +60,23 @@ quote_value() {
 # emit からは省略。description 命名規約 (`watch-pr: <owner/repo>#<N>`) は SKILL.md で
 # ロックしている。
 
+# self filter (DR-0004): 起動時に gh authenticated user の login を 1 回取得し、
+# author / actor が一致する emit を抑制する。失敗時は filter 無効化 + WARN ログ。
+# GH_MONITOR_INCLUDE_SELF=1 で env から filter off。
+self_login=""
+if [ "${GH_MONITOR_INCLUDE_SELF:-0}" = "1" ]; then
+    :  # filter off
+else
+    self_login=$(gh api user --jq .login 2>/dev/null || true)
+    if [ -z "$self_login" ]; then
+        echo "[WARN] self login 取得失敗、self filter off で続行"
+    fi
+fi
+
 echo "[INFO] watch-pr start: $repo#$pr (interval=${interval}s)"
+if [ -n "$self_login" ]; then
+    printf '[INFO] self filter: login=%s\n' "$self_login"
+fi
 
 while true; do
     cur=$(gh pr view "$pr" --repo "$repo" \
@@ -87,6 +103,8 @@ while true; do
     if [ "$initialized" -eq 1 ] && [ -n "$cur_max_comment_at" ] && [ "$cur_max_comment_at" \> "$max_comment_at" ]; then
         while IFS=$'\t' read -r author url body; do
             [ -z "$author" ] && continue
+            # self filter (DR-0004)
+            [ -n "$self_login" ] && [ "$author" = "$self_login" ] && continue
             printf '[comment:add] user:%s url:%s body:%s\n' \
                 "$(quote_value "$author")" \
                 "$url" \
@@ -101,6 +119,8 @@ while true; do
     if [ "$initialized" -eq 1 ] && [ -n "$cur_max_review_at" ] && [ "$cur_max_review_at" \> "$max_review_at" ]; then
         while IFS=$'\t' read -r author state; do
             [ -z "$author" ] && continue
+            # self filter (DR-0004)
+            [ -n "$self_login" ] && [ "$author" = "$self_login" ] && continue
             printf '[review:submit] user:%s state:%s\n' \
                 "$(quote_value "$author")" \
                 "$state"
@@ -148,7 +168,10 @@ while true; do
     if printf '%s' "$cur" | jq -e '.mergedAt != null' > /dev/null 2>&1; then
         while IFS=$'\t' read -r merged_at merged_by merge_commit; do
             commit7=$(printf '%s' "$merge_commit" | cut -c1-7)
-            if [ -n "$merged_by" ] && [ -n "$commit7" ]; then
+            # self filter (DR-0004): self-merge は emit を抑制するが exit 0 は維持
+            if [ -n "$self_login" ] && [ "$merged_by" = "$self_login" ]; then
+                :  # emit 抑制
+            elif [ -n "$merged_by" ] && [ -n "$commit7" ]; then
                 printf '[pr:merge] user:%s commit:%s at:%s\n' "$merged_by" "$commit7" "$merged_at"
             elif [ -n "$merged_by" ]; then
                 printf '[pr:merge] user:%s at:%s\n' "$merged_by" "$merged_at"

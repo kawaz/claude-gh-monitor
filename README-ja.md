@@ -80,6 +80,15 @@ emit 例:
 [run:change] workflow:ci.yml id:12345678 status:failure commit:abc1234 branch:main user:kawaz event:push
 ```
 
+### 自セッション起因イベントの suppress
+
+両 skill ともデフォルトで **同じ gh authenticated user (= `gh api user` の `.login`) が起こした comment / review / workflow run の通知を抑制** します ([DR-0004](docs/decisions/DR-0004-suppress-self-originated-events.md))。Claude 自身が `gh pr comment` 等で発火したイベントが Monitor 経由でエコーバックされて余計な思考ターンを誘発する問題への対策です。
+
+- 起動ログに `[INFO] self filter: login=<your-gh-login>` が 1 行出ます
+- `GH_MONITOR_INCLUDE_SELF=1` で suppress を完全に off
+- self-merge は `[pr:merge]` emit を抑制しますが watcher は exit 0 で正常終了
+- `[ci:change]` は author 情報を持たないため対象外
+
 ### 共通 emit 形式
 
 すべての通知行は 2 系統:

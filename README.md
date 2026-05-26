@@ -80,6 +80,15 @@ Example emit:
 [run:change] workflow:ci.yml id:12345678 status:failure commit:abc1234 branch:main user:kawaz event:push
 ```
 
+### Suppressing self-originated events
+
+Both skills suppress notifications for **comments / reviews / workflow runs whose actor matches the current `gh api user --jq .login`** by default ([DR-0004](docs/decisions/DR-0004-suppress-self-originated-events.md)). This prevents Claude's own actions (e.g. `gh pr comment`) from being echoed back through the Monitor and burning an extra reasoning turn.
+
+- The startup log includes one `[INFO] self filter: login=<your-gh-login>` line
+- Set `GH_MONITOR_INCLUDE_SELF=1` to disable the suppression entirely
+- A self-merge still exits the watcher (exit 0) but the `[pr:merge]` line itself is suppressed
+- `[ci:change]` carries no author and is never filtered
+
 ### Common emit format
 
 All notification lines fall into two categories:

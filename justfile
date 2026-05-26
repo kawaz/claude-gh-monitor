@@ -21,8 +21,12 @@ validate:
 version:
     @bump-semver get .claude-plugin/plugin.json .claude-plugin/marketplace.json
 
+# self filter (DR-0004) ほかの smoke test
+test:
+    bash tests/run-tests.sh
+
 # CI とローカルの検査範囲を完全一致させる単一エントリ
-ci: lint validate
+ci: lint validate test
 
 # @ が empty（未コミット変更なし）であることを検証
 ensure-clean:

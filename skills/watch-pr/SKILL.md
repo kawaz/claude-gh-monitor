@@ -74,9 +74,20 @@ skill 固有イベントの構造とは異質。payload は自然文 OK（KV 縛
 | イベント | 例 | アクション目安 |
 |---|---|---|
 | `[INFO] watch-pr start: <repo>#<N> (interval=...)` | 起動 ack。設定値も含む | 黙殺 (起動確認用) |
+| `[INFO] self filter: login=<login>` | self filter ON、`<login>` の発火イベントを suppress 中 (DR-0004) | 黙殺 |
 | `[INFO] gh pr view が復旧 (N 回失敗のあと)` | 障害復旧 | 通常は黙殺 |
+| `[WARN] self login 取得失敗、self filter off で続行` | `gh api user` 失敗。filter は off で続行 | gh 認証を要確認 |
 | `[WARN] gh pr view が N 回連続失敗` | gh 認証 / ネットワーク不調の可能性 | ユーザに要確認を促す |
 | `[ERROR] ...` | 致命的なエラー (実装上は usage error 等は stderr) | ユーザに報告 |
+
+## 自セッション起因イベントの suppress (DR-0004)
+
+`gh api user --jq .login` で取得した自 login と一致する author の `[comment:add]` / `[review:submit]` は **デフォルトで emit されません**。Claude 自身が `gh pr comment` 等で発火したイベントの echo を抑制する目的です。
+
+- 起動行の直後に `[INFO] self filter: login=<login>` が 1 回 emit される
+- `GH_MONITOR_INCLUDE_SELF=1` を Monitor 起動時の env に渡すと suppress off
+- self-merge の `[pr:merge]` も suppress するが exit 0 は変わらず (watcher は閉じる)
+- `[ci:change]` は author 情報を持たないため対象外
 
 ## 手動停止
 
