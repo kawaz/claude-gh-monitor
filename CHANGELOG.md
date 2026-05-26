@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2026-05-26
+
+### Security
+
+- `hooks/post_tool_use.sh`: origin remote URL のパース regex を `^(https?://|ssh://(git@)?|git@)github\.com[:/]...` に厳密化。従来は `github.com/...` 部分文字列マッチで `https://attacker.com/github.com/hacker/...` のような中間詐称を accept する可能性があった
+- `scripts/watch-pr.sh` / `scripts/watch-workflow.sh`: `quote_value()` に backslash と改行のエスケープを追加。GitHub API が返す値に control char が含まれた場合に emit 行境界が壊れるのを防ぐ
+- `.github/workflows/ci.yml`: `permissions: contents: read` を明示 (最小権限原則)
+
+### Changed
+
+- `.github/workflows/ci.yml`: shellcheck install を `shellcheck --version || apt install` に変更 (pre-install されていれば apt update をスキップして高速化)、`timeout-minutes: 10` を追加 (hang 防止)
+- `scripts/watch-workflow.sh`: `known_state` の GC を追加。poll で取得した run id 集合に含まれないキーは unset (per_page=100 から押し出された古い run のメモリ圧迫対策)
+
 ## [0.3.1] - 2026-05-26
 
 ### Changed
