@@ -48,7 +48,7 @@ The canonical record of design decisions is [docs/decisions/INDEX.md](decisions/
 | 5 | Workflow-watch launch strategy | One persistent Monitor per repo (triggered by PostToolUse hook detecting push) | [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md) |
 | 6 | Cross-session interference | Each session is independent (1 process ~2 MB in Bash, no locking needed) | — |
 | 7 | Implementation language | Bash + `gh` + `jq` (memory-efficient; Bun/TS were considered but the 1 process ~2 MB profile wins) | — |
-| 8 | Self-originated events | Suppressed by default (`GH_MONITOR_INCLUDE_SELF=1` to disable) | [DR-0004](decisions/DR-0004-suppress-self-originated-events.md) |
+| 8 | Self-originated events | watch-pr only: comments / reviews / merges suppressed by default (`GH_MONITOR_INCLUDE_SELF=1` to disable). workflow runs are not filtered (revised) | [DR-0004](decisions/DR-0004-suppress-self-originated-events.md) |
 
 ### Why Bash
 

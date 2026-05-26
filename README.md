@@ -82,12 +82,13 @@ Example emit:
 
 ### Suppressing self-originated events
 
-Both skills suppress notifications for **comments / reviews / workflow runs whose actor matches the current `gh api user --jq .login`** by default ([DR-0004](docs/decisions/DR-0004-suppress-self-originated-events.md)). This prevents Claude's own actions (e.g. `gh pr comment`) from being echoed back through the Monitor and burning an extra reasoning turn.
+`watch-pr` (only) suppresses notifications for **comments / reviews / merges whose author matches the current `gh api user --jq .login`** by default ([DR-0004](docs/decisions/DR-0004-suppress-self-originated-events.md)). This prevents Claude's own actions (e.g. `gh pr comment`) from being echoed back through the Monitor and burning an extra reasoning turn.
 
 - The startup log includes one `[INFO] self filter: login=<your-gh-login>` line
 - Set `GH_MONITOR_INCLUDE_SELF=1` to disable the suppression entirely
 - A self-merge still exits the watcher (exit 0) but the `[pr:merge]` line itself is suppressed
 - `[ci:change]` carries no author and is never filtered
+- `watch-workflow` does **not** filter by actor — CI results from your own push are still useful delayed information, so they are always emitted
 
 ### Common emit format
 

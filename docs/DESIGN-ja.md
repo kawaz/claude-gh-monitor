@@ -48,7 +48,7 @@
 | 5 | workflow 監視の起動戦略 | repo 単位の常駐 Monitor 1 本（PostToolUse hook で push 検出をトリガに起動）| [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md) |
 | 6 | セッション間の干渉 | 各セッション独立（Bash で 1 プロセス ~2MB なのでロック機構は不要）| — |
 | 7 | 実装言語 | Bash + `gh` + `jq`（メモリ効率重視。Bun/TS 検討もしたが 1 プロセス ~2MB 優位）| — |
-| 8 | 自セッション起因イベントの扱い | デフォルト suppress（`GH_MONITOR_INCLUDE_SELF=1` で off）| [DR-0004](decisions/DR-0004-suppress-self-originated-events.md) |
+| 8 | 自セッション起因イベントの扱い | watch-pr の comment / review / merge のみデフォルト suppress（`GH_MONITOR_INCLUDE_SELF=1` で off）。workflow run は対象外（改定）| [DR-0004](decisions/DR-0004-suppress-self-originated-events.md) |
 
 ### Bash 選択の経緯
 

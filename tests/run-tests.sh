@@ -179,7 +179,7 @@ test_watch_pr_self_login_unavailable() {
 }
 
 # ============================================================
-# Test 4: watch-workflow.sh actor=self-bot の run は emit されない
+# Test 4: watch-workflow.sh は actor に関わらず全 run を emit (DR-0004 改定)
 # ============================================================
 fixture_runs_with_self_and_other() {
     # updated_at は十分新しい (=今) にして cutoff にひっかからないように。
@@ -193,11 +193,11 @@ fixture_runs_with_self_and_other() {
 JSON
 }
 
-test_watch_workflow_self_filter_on() {
+test_watch_workflow_emits_all_actors() {
     local stub_dir; stub_dir=$(mktemp -d)
     trap 'rm -rf "$stub_dir"' RETURN
     write_stub "$stub_dir/bin"
-    echo 'self-bot' > "$stub_dir/api-user.txt"
+    # workflow 側は self filter なし (DR-0004 改定) なので api-user.txt 不要
     fixture_runs_with_self_and_other > "$stub_dir/runs-1.json"
     fixture_runs_with_self_and_other > "$stub_dir/runs-2.json"
 
@@ -205,30 +205,9 @@ test_watch_workflow_self_filter_on() {
     out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" WATCH_WORKFLOW_INTERVAL=1 \
         timeout 3 bash "$repo_root/scripts/watch-workflow.sh" kawaz/test 2>&1 || true)
 
-    assert_output "watch-workflow: self filter ON suppresses self runs" "$out" \
-        "$(printf 'self filter: login=self-bot\nuser:bob\n')" \
-        "$(printf 'user:self-bot\n')"
-}
-
-# ============================================================
-# Test 5: watch-workflow.sh GH_MONITOR_INCLUDE_SELF=1 で self も emit
-# ============================================================
-test_watch_workflow_self_filter_off_by_env() {
-    local stub_dir; stub_dir=$(mktemp -d)
-    trap 'rm -rf "$stub_dir"' RETURN
-    write_stub "$stub_dir/bin"
-    echo 'self-bot' > "$stub_dir/api-user.txt"
-    fixture_runs_with_self_and_other > "$stub_dir/runs-1.json"
-    fixture_runs_with_self_and_other > "$stub_dir/runs-2.json"
-
-    local out
-    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" WATCH_WORKFLOW_INTERVAL=1 \
-        GH_MONITOR_INCLUDE_SELF=1 \
-        timeout 3 bash "$repo_root/scripts/watch-workflow.sh" kawaz/test 2>&1 || true)
-
-    assert_output "watch-workflow: GH_MONITOR_INCLUDE_SELF=1 emits self runs" "$out" \
+    assert_output "watch-workflow: emits all runs regardless of actor (DR-0004 改定)" "$out" \
         "$(printf 'user:self-bot\nuser:bob\n')" \
-        ""
+        "$(printf '[INFO] self filter:\n')"
 }
 
 # ============================================================
@@ -239,8 +218,7 @@ echo "Running gh-monitor tests..."
 test_watch_pr_self_filter_on
 test_watch_pr_self_filter_off_by_env
 test_watch_pr_self_login_unavailable
-test_watch_workflow_self_filter_on
-test_watch_workflow_self_filter_off_by_env
+test_watch_workflow_emits_all_actors
 
 echo ""
 echo "Results: $pass passed, $fail failed"

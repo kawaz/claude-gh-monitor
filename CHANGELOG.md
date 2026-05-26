@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.4] - 2026-05-26
+
+### Changed
+
+- **DR-0004 改定**: `scripts/watch-workflow.sh` の self-actor filter を撤廃 ([DR-0004](docs/decisions/DR-0004-suppress-self-originated-events.md))。0.3.3 で導入した「自セッションの push で trigger された workflow run を suppress」は、dogfooding で「自分の push でも CI 結果は数分後の遅延通知で価値ある情報」と判明したため撤回。watch-workflow は actor に関わらず emit する
+- `scripts/watch-pr.sh` 側 (comment / review / merge) の self filter はそのまま継続
+- `tests/run-tests.sh`: watch-workflow のテストを「actor に関わらず全 run emit」に書き換え
+- docs/{DESIGN,DESIGN-ja,README,README-ja,skills/watch-workflow/SKILL,decisions/INDEX}: 改定に追従
+
 ## [0.3.3] - 2026-05-26
 
 ### Added
