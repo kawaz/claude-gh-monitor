@@ -15,6 +15,25 @@ claude plugin install gh-monitor@gh-monitor
 
 After installation, starting Claude Code in a worktree whose branch is tied to an open PR triggers the SessionStart hook to detect the PR and prompt `watch-pr`. Right after a `push`, the PostToolUse hook prompts `watch-workflow` to watch the workflow runs.
 
+Terms used in this README:
+
+- **hook** — a script the plugin registers with Claude Code to run automatically on session start or after a tool call (`SessionStart`, `PostToolUse`)
+- **skill** — a Claude Code primitive the assistant can invoke; here it tells Claude to start the Monitor with the right arguments
+- **Monitor tool** — the Claude Code background watcher; each emitted stdout line becomes one chat notification
+
+## Quick check after install
+
+```bash
+# 1. In a worktree whose branch has an open PR:
+gh pr list --head "$(git branch --show-current)"     # should show your PR
+claude                                                # SessionStart hook runs
+# → Expect a `watch-pr: <owner/repo>#<N>` Monitor to be running
+
+# 2. Right after a push (any of: git push / jj git push / just push / pkf run push):
+# → Expect Claude to start a `watch-workflow: <owner/repo>` Monitor
+# → Watch the chat for [run:change] ... status:success|failure ... lines
+```
+
 ## Requirements
 
 - [GitHub CLI (`gh`)](https://cli.github.com/) and `jq` installed
@@ -85,6 +104,19 @@ just bump-semver         # patch bump (pass `minor` / `major` for level)
 just push                # run all checks + version bump detection + push
 just push-without-bump   # for docs-only changes where no bump is required
 ```
+
+## Troubleshooting
+
+- **`watch-pr` did not start**
+  1. `git branch --show-current` — confirm the current branch
+  2. `gh pr list --head "$(git branch --show-current)"` — does an open PR exist?
+  3. `gh auth status` — is `gh` authenticated for this repo?
+- **`watch-workflow` did not start after push**
+  1. `git remote get-url origin` — does origin point to GitHub?
+  2. `gh api "repos/<owner>/<repo>/actions/runs?per_page=1"` — does the API answer?
+  3. Was the push reported as successful by Claude Code? (the hook stays silent on `is_error: true` or `interrupted: true`)
+- **Notifications stop arriving**
+  - Check the Claude Code TaskList for `watch-*` Monitors — if missing, simply rerun the hook trigger (start a session / push again)
 
 ## Documentation
 

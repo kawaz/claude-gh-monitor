@@ -15,6 +15,25 @@ claude plugin install gh-monitor@gh-monitor
 
 インストール後、対応するブランチ（= open PR に紐づく bookmark / branch）の worktree で Claude Code を起動すると、SessionStart hook が PR を自動検出し watch-pr の起動を促します。push を実行した直後は PostToolUse hook が workflow run の watch を促します。
 
+本 README で使う用語:
+
+- **hook**: plugin が Claude Code に登録するスクリプト。セッション開始時や tool 実行後に自動で動く (`SessionStart`, `PostToolUse`)
+- **skill**: Claude Code が呼び出せる primitive。ここでは Claude に「適切な引数で Monitor を起動して」と指示する役割
+- **Monitor ツール**: Claude Code 内蔵のバックグラウンド watcher。emit された stdout 1 行 = chat に 1 件の通知
+
+## インストール後の動作確認
+
+```bash
+# 1. open PR のあるブランチの worktree で:
+gh pr list --head "$(git branch --show-current)"     # PR が表示されるはず
+claude                                                # SessionStart hook 発火
+# → `watch-pr: <owner/repo>#<N>` description の Monitor が動くのが期待値
+
+# 2. push (git push / jj git push / just push / pkf run push のいずれか) の直後:
+# → `watch-workflow: <owner/repo>` description の Monitor が立ち上がる
+# → chat に [run:change] ... status:success|failure ... が流れるのを待つ
+```
+
 ## 前提
 
 - [GitHub CLI (`gh`)](https://cli.github.com/) と `jq` がインストール済み
@@ -85,6 +104,19 @@ just bump-semver         # patch bump (minor / major も引数で指定可)
 just push                # 全チェック + version bump 検出 + push
 just push-without-bump   # docs only 等で bump 不要な場合
 ```
+
+## トラブルシューティング
+
+- **`watch-pr` が起動しない**
+  1. `git branch --show-current` — 現在のブランチを確認
+  2. `gh pr list --head "$(git branch --show-current)"` — open PR があるか
+  3. `gh auth status` — 該当 repo への gh 認証は有効か
+- **push しても `watch-workflow` が起動しない**
+  1. `git remote get-url origin` — origin が GitHub を指しているか
+  2. `gh api "repos/<owner>/<repo>/actions/runs?per_page=1"` — API が応答するか
+  3. push 自体は Claude Code 内で成功扱いだったか (hook は `is_error: true` / `interrupted: true` だと黙る)
+- **通知が来なくなった**
+  - Claude Code の TaskList で `watch-*` Monitor が動いているか確認 → 消えていれば再度 hook を発火 (セッション再開 / 再 push)
 
 ## ドキュメント
 
