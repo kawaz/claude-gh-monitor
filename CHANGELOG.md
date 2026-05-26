@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-05-26
+
+### Changed
+
+- justfile を kawaz/* 横断ルールに揃える: `bump-version` レシピを `bump-semver` に改名、手書き jq の 2 ファイル書き換えを `bump-semver --write` の 1 行に置換、新 `ci` レシピ (lint + validate) を追加、`push` の deps を `ci` に追従
+- `.github/workflows/`: 旧 `shellcheck.yml` を廃止し `ci.yml` に統合 (setup-bun + setup-just + `just ci`)
+- `.github/dependabot.yml` 新設 (github-actions weekly)
+- README / docs/DESIGN を翻訳ペア化 (`README-ja.md` 原本 + `README.md` 英訳、`docs/DESIGN-ja.md` + `docs/DESIGN.md`)。冒頭に相互リンク blockquote
+
+### Removed
+
+- `docs/issue/2026-05-09-migrate-justfile-and-ci-and-dependabot.md` (本リリースで解決)
+- `docs/issue/2026-05-09-migrate-to-docs-structure.md` (本リリースで解決)
+
+## [0.3.0] - 2026-05-26
+
+### Added
+
+- `watch-workflow` 機能を実装: `gh api /repos/<owner>/<repo>/actions/runs` を 30s 間隔で poll し、状態変化を 1 行 emit ([DR-0003](docs/decisions/DR-0003-watch-workflow-persistent-per-repo.md))
+- PostToolUse hook を追加: Bash tool の `git`/`jj`/`just`/`pkf` push 成功を検出して `watch-workflow` 起動を促す ([DR-0002](docs/decisions/DR-0002-hook-minimal-output.md))
+- `skills/watch-workflow/SKILL.md` 新設
+
+### Changed
+
+- 全 skill の emit format を統一:
+  - (a) skill 固有のイベント: `[scope:action] key:value ...` (verb:noun)
+  - (b) severity メッセージ: `[INFO|WARN|ERROR] <自由文>` (起動 ack / 障害通知)
+  - skill 名 / repo / PR# などのスコープ識別子は Monitor description (= 通知 summary) に逃がし、emit 行から省略
+- watch-pr の CI 通知を「全 check サマリ 1 行」から「変化のあった check 1 つにつき 1 行」に変更
+- watch-pr の `[pr:merge]` に user / commit (sha7) を追加
+- watch-pr の `[comment:add]` に url を追加
+- watch-pr の `[ci:change]` に url (detailsUrl / targetUrl) を追加
+
 ## [0.2.0] - 2026-05-26
 
 ### Changed (BREAKING)
