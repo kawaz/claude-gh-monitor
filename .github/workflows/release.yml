@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".claude-plugin/plugin.json"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 全 tag 取得用
+
+      - name: Install bump-semver
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-delay 2 --max-time 60 \
+            "https://github.com/kawaz/bump-semver/releases/latest/download/bump-semver-linux-amd64" \
+            -o /usr/local/bin/bump-semver
+          chmod +x /usr/local/bin/bump-semver
+          bump-semver --version
+
+      - name: Check version & create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          VERSION=$(jq -r '.version' .claude-plugin/plugin.json)
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ] || [ "$VERSION" = "0.0.0" ]; then
+            echo "::notice::Placeholder/empty version; skipping."
+            exit 0
+          fi
+
+          # 既存 tag と比較 (semver gt 検証で二重リリース防止)
+          set +e
+          bump-semver compare gt "$VERSION" 'vcs:latest-tag()' --vcs git
+          CMP_EXIT=$?
+          set -e
+          case "$CMP_EXIT" in
+            0) ;;  # VERSION > latest-tag, 続行
+            1)
+              echo "::notice::v${VERSION} is not greater than latest tag; skipping."
+              exit 0 ;;
+            2)
+              echo "::notice::No prior tags; assuming first release."
+              ;;
+            *)
+              echo "::error::Unexpected exit code from bump-semver compare: ${CMP_EXIT}"
+              exit 1 ;;
+          esac
+
+          # gh release で既存確認 (compare で通っても念のため)
+          if gh release view "v${VERSION}" --repo "$REPO" >/dev/null 2>&1; then
+            echo "::notice::v${VERSION} already released; skipping."
+            exit 0
+          fi
+
+          gh release create "v${VERSION}" \
+            --repo "$REPO" \
+            --title "v${VERSION}" \
+            --target "$COMMIT_SHA" \
+            --generate-notes
