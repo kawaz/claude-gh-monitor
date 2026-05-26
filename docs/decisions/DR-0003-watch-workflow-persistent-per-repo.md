@@ -92,11 +92,51 @@ workflow hook には `detect-pr.sh` 相当の補助がない。初期実装は *
 軽量 1 行:
 
 ```
-[watch-workflow] workflow:ci.yml id:12345678 status:failure commit:abc1234 user:kawaz branch:main
+[watch-workflow] workflow:ci.yml id:12345678 status:failure commit:abc1234 branch:main user:kawaz event:push
 ```
 
 - `status` の語彙は **gh 準拠**: workflow run の `status` (`queued` / `in_progress` / `completed`) と、`completed` 時の `conclusion` (`success` / `failure` / `cancelled` / `skipped` / `timed_out` / `action_required` 等) をフラット化した 1 語として出す
 - ユーザー当初挙げた `run` / `succeeded` / `failed` は gh 語彙とズレるため使わない (正: `in_progress` / `success` / `failure`)
+
+### 2026-05-26 実装時調整 (2): emit を `[event] key:value` 形式に統一、スコープ識別は Monitor description に逃がす
+
+実機で Monitor 通知の見え方 (Claude 側の `<task-notification>` ラッパー) を確認した結果、以下が判明:
+
+- Monitor の `description` (例: `watch-workflow: kawaz/foo`) が `<summary>` として全通知に乗る (= 起動時に Claude が設定した値がそのまま反映される、システム側のアレンジは無い)
+- timestamp は通知本体に含まれない (= 到着時刻 ≈「今」と扱う)
+- 同じ Monitor から複数種の行 (状態通知 / 障害通知 / ack 等) が混じると、行内の構造で型を判別する必要がある
+
+これを踏まえて emit format を以下に刷新 (watch-pr 側も同様に揃える):
+
+- emit は 2 系統で形式を分ける:
+  - **(a) skill 固有のイベント**: `[scope:action] key:value ...` 形式 (verb:noun)。watch-workflow は `[run:change]`、watch-pr は `[comment:add]` / `[review:submit]` / `[ci:change]` / `[pr:merge]` / `[pr:close]`。payload は構造化された key:value
+  - **(b) severity メッセージ**: `[INFO|WARN|ERROR] <自由文>` 形式。skill スコープと一致しないメタ通知 (起動 ack / 障害通知 / 致命エラー) は KV 縛りを緩めて自然文。skill 固有イベントとの構造的な異質感をあえて残す
+- **skill 名 / repo / PR# などのスコープ識別子は emit から省略**。Monitor description (= `<summary>`) で識別する前提とし、description の命名規約を SKILL.md でロック (`watch-workflow: <owner/repo>`, `watch-pr: <owner/repo>#<N>`)
+- 起動 ack は (b) の `[INFO] <skill> start: <repo> (interval=..., lookback=...)` として残す (description には乗らない設定値を残せる)
+- 値にスペース等を含む場合のみ double quote (skill 固有イベント側のみ)
+
+新しい emit 例:
+
+```
+[INFO] watch-workflow start: kawaz/foo (interval=30s, lookback=5m)
+[run:change] workflow:ci.yml id:12345678 status:failure commit:abc1234 branch:main user:kawaz event:push
+[WARN] gh api が 5 回連続失敗
+[INFO] gh api が復旧 (5 回失敗のあと)
+```
+
+この調整も本 DR の本筋には影響しない実装ディテール。
+
+### 2026-05-26 実装時調整 (1): gh API 経路への切替 + event の追加
+
+当初案では `gh run list --json ...` を poll 経路として想定していたが、gh 2.92.0 時点で `--json` field に **`actor` が含まれない** ことが実装時の動作検証で判明。`actor` field を要求すると `Unknown JSON field: "actor"` で gh が即失敗し、poll 自体が成立しない。
+
+対応として:
+
+- **poll 経路を `gh api /repos/<owner>/<repo>/actions/runs?per_page=100` に変更**。REST API の `workflow_runs[]` には `actor.login` / `triggering_actor.login` が含まれる。1 page 想定で paginate なし (個人プロジェクトの run 件数想定として十分)
+- emit format に `event` フィールドを追加。`event` (`push` / `pull_request` / `workflow_dispatch` / `schedule` 等) は trigger 起因の判別に役立ち、将来 `--only-mine` / `--events` のフィルタ実装時にも一貫した語彙を維持できる
+- `actor.login` も emit に含める方針は維持。個人用途では実質ほぼ自分 (kawaz) だが、チーム開発の将来需要を見据えて情報の取得自体は確保する
+
+この調整は本 DR の本筋 (= repo 単位の常駐 Monitor 1 本 / cutoff lookback での baseline 構築) に影響しない実装ディテール。Superseded 扱いではなく追記で済む範囲。
 
 ## ポーリング仕様
 

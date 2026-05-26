@@ -7,15 +7,15 @@ GitHub の非同期イベント（PR の状態変化 + GitHub Actions workflow r
 実装機能:
 
 - **watch-pr**: ブランチに紐づく GitHub PR の状態変化（コメント / レビュー / CI / マージ）。SessionStart hook で PR を検出して skill 起動を促す
-- **watch-workflow**: GitHub Actions workflow run の start / success / failure 等。PostToolUse hook で push を検出して skill 起動を促す (実装予定、[DR-0003](docs/decisions/DR-0003-watch-workflow-persistent-per-repo.md))
+- **watch-workflow**: GitHub Actions workflow run の start / success / failure 等。PostToolUse hook で push を検出して skill 起動を促す（[DR-0003](docs/decisions/DR-0003-watch-workflow-persistent-per-repo.md)）
 
 ## 3-layer 構造
 
-| Layer | watch-pr | watch-workflow (予定) |
-|-------|----------|----------------------|
-| Hook | `hooks/hooks.json` + `hooks/session_start.sh` | PostToolUse hook (`hooks/hooks.json` に追加予定) |
-| Skill | `skills/watch-pr/SKILL.md` | (未実装) |
-| Scripts | `scripts/watch-pr.sh` / `scripts/detect-pr.sh` | `scripts/watch-workflow.sh` (未実装) |
+| Layer | watch-pr | watch-workflow |
+|-------|----------|----------------|
+| Hook | `hooks/hooks.json` + `hooks/session_start.sh` | `hooks/hooks.json` + `hooks/post_tool_use.sh` |
+| Skill | `skills/watch-pr/SKILL.md` | `skills/watch-workflow/SKILL.md` |
+| Scripts | `scripts/watch-pr.sh` / `scripts/detect-pr.sh` | `scripts/watch-workflow.sh` |
 
 ## 設計原則
 

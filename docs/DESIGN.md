@@ -87,7 +87,7 @@
 [Claude が必要ならユーザーに報告]
 ```
 
-### watch-workflow (実装予定、設計のみ)
+### watch-workflow (実装済み)
 
 ```
 [Claude が Bash ツールで git/jj/just/pkf push を実行]
@@ -121,12 +121,14 @@
 |---|---|
 | `.claude-plugin/plugin.json` | plugin manifest (name / version / author / repository) |
 | `.claude-plugin/marketplace.json` | marketplace manifest (install 用) |
-| `hooks/hooks.json` | hook 登録 (SessionStart 実装済 + PostToolUse 予定) |
+| `hooks/hooks.json` | hook 登録 (SessionStart + PostToolUse) |
 | `hooks/session_start.sh` | hook 本体。PR 検出 → skill 起動指示を stdout に出す |
+| `hooks/post_tool_use.sh` | hook 本体。Bash tool の push 成功検出 → JSON で additionalContext を返す |
 | `scripts/detect-pr.sh` | カレントブランチから open PR を検出。`OWNER/REPO\tPR_NUMBER` を出す |
 | `scripts/watch-pr.sh` | Monitor 対象本体。60s ごとに `gh pr view` し、変化時のみ 1 行 emit |
-| `scripts/watch-workflow.sh` | (未実装) repo の workflow run を継続 poll し、状態変化を 1 行 emit |
-| `skills/watch-pr/SKILL.md` | skill 定義。Monitor 起動引数・通知行の意味・重複防止 |
+| `scripts/watch-workflow.sh` | Monitor 対象本体。30s ごとに `gh api .../actions/runs` を poll し、状態変化のみ 1 行 emit |
+| `skills/watch-pr/SKILL.md` | watch-pr skill 定義。Monitor 起動引数・通知行の意味・重複防止 |
+| `skills/watch-workflow/SKILL.md` | watch-workflow skill 定義。同上 |
 | `justfile` | validate / lint / version / push |
 
 ### スクリプト間の責任分担
@@ -141,22 +143,37 @@
 
 ## 4. 動作仕様
 
+### 共通 emit 設計
+
+全 skill の出力は 2 系統の形式に揃える:
+
+#### (a) skill 固有のイベント — `[scope:action] key:value ...` 形式
+
+- 先頭の `[scope:action]` がイベント種別 (verb:noun)。例: `[run:change]` `[comment:add]` `[review:submit]` `[ci:change]` `[pr:merge]` `[pr:close]`
+- 残り payload は `key:value` を空白区切り
+- 値にスペース等を含む場合のみ double quote
+- skill 名 / repo / PR# などのスコープ識別は **Monitor description** (= `<task-notification>` の `<summary>`) に逃がし、emit 行からは省略する
+- description は SKILL.md で命名規約をロック (`watch-pr: <owner/repo>#<N>`, `watch-workflow: <owner/repo>`)。重複防止 (TaskList grep) もこの命名に乗る
+
+#### (b) severity メッセージ — `[INFO|WARN|ERROR] <自由文>` 形式
+
+- skill 固有イベントの構造化方式とは異質に保つ（payload は自然文 OK、KV 縛りを緩める）
+- 起動 ack (`[INFO] <skill> start: <repo> (interval=...)`) はここに含める。description には乗らない設定値 (interval / lookback) も書ける
+- 障害通知も `[WARN] gh ... が N 回連続失敗` のような自然文
+- スクリプトの致命的な usage error 等は stderr に出す (stdout の通知経路に乗せない)
+
 ### watch-pr
-
-#### 起動時
-
-```
-[WATCH-START] OWNER/REPO #N (interval=60s)
-```
 
 #### 変化検出時に出る行
 
-| 行頭パターン | 意味 | 例 |
+| イベント | 後続フィールド | 意味 |
 |---|---|---|
-| `[COMMENT by <login>] <body 先頭200字>` | 新規コメント | `[COMMENT by alice] LGTM with a small suggestion…` |
-| `[REVIEW <STATE> by <login>]` | レビュー提出 | `[REVIEW APPROVED by alice]` |
-| `[CI] <name>=<state>, ...` | CI check 状態サマリ（変化時のみ） | `[CI] Test=success, Detect parallel changes=failure` |
-| `[MERGED] at <timestamp> - watch ends` | マージ検出 → 直後 exit | `[MERGED] at 2026-04-23T02:00:00Z - watch ends` |
+| `[comment:add]` | `user:<login> url:<url> body:"..."` | 新規コメント、本文先頭 200 字、URL は深堀用 |
+| `[review:submit]` | `user:<login> state:<STATE>` | レビュー提出 (url は gh CLI の json schema に無いため省略) |
+| `[ci:change]` | `check:"<name>" status:<status> url:<url>` | CI check の状態変化（check 1 つにつき 1 行）、url は detailsUrl/targetUrl |
+| `[pr:merge]` | `user:<login> commit:<sha7> at:<timestamp>` | マージ検出 → 直後 exit、mergedBy / mergeCommit が無い場合は該当 field を省略 |
+| `[pr:close]` | (なし) | クローズ検出 → 直後 exit |
+| `[INFO]` / `[WARN]` | (自然文) | 起動 ack / 復旧 / gh コマンド連続失敗 等 |
 
 #### ハッシュ比較で同一視するフィールド
 
@@ -171,18 +188,25 @@
 
 本文の細かい編集（既存コメントのタイポ修正等）では emit しない。リアクション追加でも emit しない。「誰がいつ行動したか」を追う設計。
 
-### watch-workflow (実装予定)
+### watch-workflow
 
-#### 起動時
+#### 起動 ack
 
-(初回 poll の baseline 構築まで無出力)
+```
+[INFO] watch-workflow start: kawaz/foo (interval=30s, lookback=5m)
+```
 
 #### 変化検出時に出る行
 
-軽量 1 行:
+```
+[run:change] workflow:ci.yml id:12345678 status:failure commit:abc1234 branch:main user:kawaz event:push
+```
+
+#### 障害通知
 
 ```
-[watch-workflow] workflow:ci.yml id:12345678 status:failure commit:abc1234 user:kawaz branch:main
+[WARN] gh api が 5 回連続失敗
+[INFO] gh api が復旧 (5 回失敗のあと)
 ```
 
 `status` の語彙は gh 準拠（`queued` / `in_progress` / `success` / `failure` / `cancelled` / `skipped` / `timed_out` / `action_required` 等をフラット化）。詳細は [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md)。
@@ -197,10 +221,10 @@
 - skill description optimizer 未実施（実運用 iterate で詰める）
 - 実運用検証: [docs/findings/](findings/) 参照
 
-### watch-workflow ⏳ 設計のみ、実装はこれから
+### watch-workflow ✅ 実装済み
 
 - 設計判断は [DR-0001](decisions/DR-0001-rename-and-scope-expand.md) / [DR-0002](decisions/DR-0002-hook-minimal-output.md) / [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md)
-- 残作業: `scripts/watch-workflow.sh` + PostToolUse hook + skill (skill 構成は 1 本にまとめるか分けるか未決)
+- DR-0003 の emit format からの差分: gh 2.92.0 の `gh run list --json` に `actor` field が無いため `gh api /repos/<owner>/<repo>/actions/runs?per_page=100` 経路に切り替え、`actor.login` と `event` の両方を emit に含める形に確定 (2026-05-26 実装時調整)
 
 ### 追加の改善候補（将来）
 

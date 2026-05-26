@@ -53,18 +53,30 @@ persistent:  true
 
 ## 通知行の読み方
 
-Monitor から 1 行ずつ届く。行頭のタグで意味が分かる:
+emit は 2 系統:
 
-| 行頭 | 意味 | アクション目安 |
+### (a) skill 固有のイベント — `[scope:action] key:value ...` 形式
+
+skill 名 / repo / PR# は Monitor description (= 通知 `<summary>`) で識別する前提で emit からは省略される。残り payload は `key:value`。
+
+| イベント | 後続フィールド | 意味 | アクション目安 |
+|---|---|---|---|
+| `[comment:add]` | `user:<login> url:<url> body:"..."` | 新規コメント、本文先頭 200 字、URL は深堀用 | 内容を判断しユーザに要約報告 |
+| `[review:submit]` | `user:<login> state:<STATE>` | レビュー提出、STATE ∈ {APPROVED, CHANGES_REQUESTED, COMMENTED}。url は gh CLI の json schema に無いため省略 | ユーザに通知 |
+| `[ci:change]` | `check:"<name>" status:<status> url:<url>` | 個別 CI check の状態変化（変化時のみ、check 1 つで 1 行）。url は detailsUrl / targetUrl のあるものだけ付く | failure / error / cancelled は url から直接ログにジャンプして詳細取得 |
+| `[pr:merge]` | `user:<login> commit:<sha7> at:<timestamp>` | PR マージ検出（スクリプトはこの直後 exit）。mergedBy / mergeCommit が無い場合はその field を省略 | ユーザに完了を報告 |
+| `[pr:close]` | (なし) | PR close 検出（exit） | ユーザに通知 |
+
+### (b) severity メッセージ — `[INFO|WARN|ERROR] <自由文>` 形式
+
+skill 固有イベントの構造とは異質。payload は自然文 OK（KV 縛りを緩める）。
+
+| イベント | 例 | アクション目安 |
 |---|---|---|
-| `[WATCH-START]` | 監視開始（起動確認） | 特に何もしない（ユーザへの確認不要） |
-| `[COMMENT by LOGIN]` | 新規コメント、本文先頭 200 字 | 内容を判断しユーザに要約報告 |
-| `[REVIEW STATE by LOGIN]` | レビュー提出、STATE ∈ {APPROVED, CHANGES_REQUESTED, COMMENTED} | ユーザに通知 |
-| `[CI]` | CI check 状態サマリ（変化時のみ） | failure があれば内容取得しユーザに報告 |
-| `[MERGED] at ...` | PR マージ検出（スクリプトはこの直後 exit） | ユーザに完了を報告 |
-| `[CLOSED] ...` | PR close 検出（exit） | ユーザに通知 |
-| `[WARN] gh pr view が N 回連続失敗...` | gh 認証・ネットワーク不調の可能性 | ユーザに要確認を促す |
-| `[INFO] gh pr view が復旧` | 障害からの復旧 | 通常は黙殺してよい |
+| `[INFO] watch-pr start: <repo>#<N> (interval=...)` | 起動 ack。設定値も含む | 黙殺 (起動確認用) |
+| `[INFO] gh pr view が復旧 (N 回失敗のあと)` | 障害復旧 | 通常は黙殺 |
+| `[WARN] gh pr view が N 回連続失敗` | gh 認証 / ネットワーク不調の可能性 | ユーザに要確認を促す |
+| `[ERROR] ...` | 致命的なエラー (実装上は usage error 等は stderr) | ユーザに報告 |
 
 ## 手動停止
 
