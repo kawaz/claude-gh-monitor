@@ -61,6 +61,23 @@ GH_MONITOR_INCLUDE_SELF=1 bash scripts/watch-pr.sh kawaz/test 1
 
 「気付き」は実装直後の dogfooding で生まれる。「実装した瞬間に使ってみる」習慣が本件の救いになった。
 
+## 続編: 0.3.4 Monitor の実観測 (同日)
+
+0.3.4 push 後、watch-workflow Monitor が **dependabot[bot] が trigger した dynamic workflow run** を `queued → failure` の 2 行で正しく emit した:
+
+```
+[run:change] workflow:"github_actions in /. - Update #1384726129" id:26448413890 status:queued commit:5626c90 branch:main user:dependabot[bot] event:dynamic
+[run:change] workflow:"github_actions in /. - Update #1384726129" id:26448413890 status:failure commit:5626c90 branch:main user:dependabot[bot] event:dynamic
+```
+
+得られた追加知見:
+
+1. **DR-0004 改定の妥当性が裏付けされた**: actor=dependabot[bot] なので元から self filter 対象外。改定前の実装 (workflow にも self filter) でも emit されたはず。dogfooding で起きた問題 (`actor=kawaz の workflow run が silent`) は改定対象が違う問題で、こちらの bot trigger 例とは独立に発生する
+2. **Followup #1 (中間遷移 suppress) の根拠**: 1 run につき `queued` と `failure` で 2 行流れる。queued の通知価値は routine 寄りなので「結果通知のみ」モードがあれば 1 行に絞れる。dogfood 観測としては Followup #1 を実装に進める動機が明確になった
+3. **failure の原因解析**: dependabot-action の SHA tarball DL が GitHub 内部の transient error。kawaz repo 側の対応は不要。Monitor の動作確認材料として有用だった
+
+別件として: self push (kawaz) で ci.yml/release.yml が trigger されない問題は依然として観測継続中で、`docs/issue/2026-05-26-ci-workflow-not-triggered-on-push.md` に kawaz 対応依頼として残してある。dependabot dynamic 経路だけ動いている事実は、その issue の trigger 制限が「push event 単独で何かが効いている」可能性を示唆。
+
 ## 次にやるべきこと
 
 - Followup #1 (CI 中間遷移 suppress) は別 issue で起票済み。watch-workflow が `queued` / `in_progress` 連発で噛むことが観測できたら着手
