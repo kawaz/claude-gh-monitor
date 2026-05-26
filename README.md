@@ -13,7 +13,7 @@ claude plugin marketplace add kawaz/claude-gh-monitor
 claude plugin install gh-monitor@gh-monitor
 ```
 
-After installation, starting Claude Code in a worktree whose branch is tied to an open PR will trigger the SessionStart hook to detect the PR and prompt `watch-pr`. Right after a `push`, the PostToolUse hook will prompt `watch-workflow` to watch the workflow runs.
+After installation, starting Claude Code in a worktree whose branch is tied to an open PR triggers the SessionStart hook to detect the PR and prompt `watch-pr`. Right after a `push`, the PostToolUse hook prompts `watch-workflow` to watch the workflow runs.
 
 ## Requirements
 
@@ -25,7 +25,7 @@ After installation, starting Claude Code in a worktree whose branch is tied to a
   gh auth login       # interactive setup if not authenticated
   ```
 
-- The repository is laid out as a git worktree or jj workspace
+- The repository is laid out as a git worktree or a jj workspace
 
 ## Features
 

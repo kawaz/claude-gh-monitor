@@ -1,5 +1,5 @@
 ---
-description: "GitHub Actions の workflow run (CI / lint / release / dispatch 等) を repo 単位で継続監視し、状態変化 (queued / in_progress / success / failure / cancelled / 等) を 1 行通知する。PostToolUse hook が `git/jj/just/pkf push` の成功を検出した直後に起動を促す。push 直後・CI 通過待ち・release workflow 監視の文脈では明示指示なしでも起動候補。"
+description: "Watch GitHub Actions workflow runs (CI / lint / release / dispatch, etc.) per repository via the Monitor tool and emit one-line notifications on state changes (queued / in_progress / success / failure / cancelled / timed_out / action_required). PostToolUse hook prompts launching this skill right after a successful `git/jj/just/pkf push`. Suggest enabling after push, while waiting for CI, or to watch release workflows — even without explicit instruction. (日本語: GitHub Actions の workflow run を repo 単位で継続監視し、状態変化を 1 行通知する。push 直後・CI 通過待ち・release workflow 監視では明示指示なしでも起動候補。)"
 ---
 
 # watch-workflow

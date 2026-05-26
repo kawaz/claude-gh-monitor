@@ -137,7 +137,7 @@ Details: [DR-0002](decisions/DR-0002-hook-minimal-output.md) / [DR-0003](decisio
 
 - **The hook only emits the minimal instruction.** Claude reads the hook's output and starts the Monitor.
   - Reason: if the hook itself starts a Monitor as a child process, its lifetime becomes ambiguous when the hook exits.
-  - Going through the Monitor tool ensures the process is correctly managed as "part of the session."
+  - By having Claude invoke the Monitor tool (rather than the hook starting a child process directly), the process lifetime is correctly managed as "part of the session."
   - The context-injection path differs per event type: SessionStart uses plain stdout, PostToolUse uses JSON with `hookSpecificOutput.additionalContext`. See [DR-0002](decisions/DR-0002-hook-minimal-output.md) for details.
 - **`watch-pr.sh` / `watch-workflow.sh` only do change detection and emit.** Duplicate-launch prevention is the responsibility of the upper layer (Monitor description match).
 
