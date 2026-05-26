@@ -3,9 +3,15 @@
 default:
     @just --list
 
-# shellcheck（scripts/ と hooks/ の .sh を検査）
+# shellcheck（scripts/ と hooks/ の .sh を検査）+ actionlint (.github/workflows/*.yml)
+# actionlint が未インストールでも lint 自体は失敗させない (warning 表示のみ)
 lint:
     shellcheck scripts/*.sh hooks/*.sh
+    @if command -v actionlint >/dev/null 2>&1; then \
+        actionlint .github/workflows/*.yml; \
+    else \
+        echo "(actionlint not installed, skipping; install: brew install actionlint)" >&2; \
+    fi
 
 # プラグイン manifest の検証
 validate:

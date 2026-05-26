@@ -23,5 +23,5 @@ jobs:
       - name: Install Claude Code via bun (for claude plugin validate)
         run: |
           bun add -g @anthropic-ai/claude-code
-          echo "$(bun pm bin -g)" >> "$GITHUB_PATH"
+          bun pm bin -g >> "$GITHUB_PATH"
       - run: just ci
