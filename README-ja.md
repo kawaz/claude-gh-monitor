@@ -108,7 +108,9 @@ skill 名 / repo / PR# などのスコープ識別子は Monitor description (= 
 ## Development
 
 ```bash
-just ci                  # lint + validate (CI と同一)
+just ci                  # lint + validate + test (CI と同一)
+just lint                # shellcheck (scripts/ hooks/) + actionlint (.github/workflows)
+just test                # tests/run-tests.sh (gh stubbed smoke tests, bats 不要)
 just version             # バージョン表示
 just bump-semver         # patch bump (minor / major も引数で指定可)
 just push                # 全チェック + version bump 検出 + push

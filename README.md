@@ -108,7 +108,9 @@ Scope identifiers such as skill name / repo / PR# are pushed into the Monitor de
 ## Development
 
 ```bash
-just ci                  # lint + validate (matches CI exactly)
+just ci                  # lint + validate + test (matches CI exactly)
+just lint                # shellcheck (scripts/ hooks/) + actionlint (.github/workflows)
+just test                # tests/run-tests.sh (gh-stubbed smoke tests, no bats required)
 just version             # show current version
 just bump-semver         # patch bump (pass `minor` / `major` for level)
 just push                # run all checks + version bump detection + push
