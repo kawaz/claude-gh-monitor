@@ -76,7 +76,13 @@ GH_MONITOR_INCLUDE_SELF=1 bash scripts/watch-pr.sh kawaz/test 1
 2. **Followup #1 (中間遷移 suppress) の根拠**: 1 run につき `queued` と `failure` で 2 行流れる。queued の通知価値は routine 寄りなので「結果通知のみ」モードがあれば 1 行に絞れる。dogfood 観測としては Followup #1 を実装に進める動機が明確になった
 3. **failure の原因解析**: dependabot-action の SHA tarball DL が GitHub 内部の transient error。kawaz repo 側の対応は不要。Monitor の動作確認材料として有用だった
 
-別件として: self push (kawaz) で ci.yml/release.yml が trigger されない問題は依然として観測継続中で、`docs/issue/2026-05-26-ci-workflow-not-triggered-on-push.md` に kawaz 対応依頼として残してある。dependabot dynamic 経路だけ動いている事実は、その issue の trigger 制限が「push event 単独で何かが効いている」可能性を示唆。
+別件として: self push (kawaz) で ci.yml/release.yml が trigger されない問題があるように見えたが、**直後の push (`2e088de`) で `workflow:CI id:26448522590 event:push actor:kawaz` が普通に走った** ことを Monitor で観測。先に起票した `docs/issue/2026-05-26-ci-workflow-not-triggered-on-push.md` は誤観測だった (削除済み)。
+
+誤観測の原因は **`gh api workflow_runs?per_page=10` の表示遅延**: push 直後 (数秒以内) に list を取ると、まだ runner queue 入り前で新 run が出てこない。古い `shellcheck` の history が上位に出ていたため「新 ci.yml/release.yml の run が一度もない」と早合点した。実際には 2-3 分待てば list に現れていた可能性が高い。
+
+教訓: push trigger の確認は単発の list ではなく Monitor (poll loop) に任せた方が正確。今回は dogfood している watch-workflow がまさにその役割を果たし、誤観測を覆す決定打になった。
+
+CI run 自体は `codeload.github.com` から `oven-sh/setup-bun@v2` の SHA tarball DL が失敗 (GitHub 内部 transient)。`gh run rerun --failed` で再投入済み。Monitor が結果を捕捉する見込み。
 
 ## 次にやるべきこと
 
