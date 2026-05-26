@@ -36,11 +36,17 @@ warned_fail=0
 
 echo "[INFO] watch-workflow start: $repo (interval=${interval}s, lookback=${lookback_min}m)"
 
-# 値にスペース等を含む場合だけ double quote、それ以外は素のまま。
-# 受信側 (Claude) が key=value を空白区切りで素朴に拾える形を保つ。
+# 値にスペース・引用符・バックスラッシュ・改行を含む場合だけ double quote、
+# それ以外は素のまま。受信側 (Claude) が key:value を空白区切りで素朴に拾える形を保つ。
+# backslash は先に escape する (順序重要: " より前)。
 quote_value() {
     case "$1" in
-        *[[:space:]\"]*) printf '"%s"' "${1//\"/\\\"}" ;;
+        *[[:space:]\"\\]*|*$'\n'*)
+            local v="${1//\\/\\\\}"
+            v="${v//\"/\\\"}"
+            v="${v//$'\n'/\\n}"
+            printf '"%s"' "$v"
+            ;;
         '') printf '""' ;;
         *) printf '%s' "$1" ;;
     esac
@@ -113,6 +119,20 @@ while true; do
             ((.updated_at // .created_at) | fromdateiso8601)
         ] | @tsv
     ' 2>/dev/null)
+
+    # GC: 現 poll で見えなかった run_id (= per_page=100 から押し出された古い run) は
+    # API から再取得不能なので known_state から落として良い。
+    # poll の TSV に登場した id 集合を作って、known_state から不在分を unset する。
+    if [ "$initialized" -eq 1 ]; then
+        declare -A seen_ids=()
+        while IFS=$'\t' read -r seen_rid _; do
+            [ -n "$seen_rid" ] && seen_ids[$seen_rid]=1
+        done < <(printf '%s' "$json" | jq -r '.workflow_runs[] | [.id | tostring, ""] | @tsv' 2>/dev/null)
+        for k in "${!known_state[@]}"; do
+            [ -z "${seen_ids[$k]:-}" ] && unset 'known_state[$k]'
+        done
+        unset seen_ids
+    fi
 
     initialized=1
     sleep "$interval"

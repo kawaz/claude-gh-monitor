@@ -7,15 +7,19 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - uses: extractions/setup-just@v3
-      - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Ensure shellcheck
+        run: shellcheck --version || (sudo apt-get update && sudo apt-get install -y shellcheck)
       - name: Install Claude Code via bun (for claude plugin validate)
         run: |
           bun add -g @anthropic-ai/claude-code

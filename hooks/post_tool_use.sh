@@ -59,8 +59,12 @@ url=$(git -C "$workdir" config --get remote.origin.url 2>/dev/null || true)
 url=${url%.git}
 
 repo=""
-if [[ "$url" =~ github\.com[:/]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$ ]]; then
-    repo=${BASH_REMATCH[1]}
+# URL の先頭から厳密にマッチさせる。`attacker.com/github.com/...` のような中間
+# 詐称を防ぐため、ホスト部の前置プロトコル / ssh prefix を明示。
+# 対応: https://github.com/o/r, http://github.com/o/r, ssh://git@github.com/o/r,
+#       git@github.com:o/r
+if [[ "$url" =~ ^(https?://|ssh://(git@)?|git@)github\.com[:/]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$ ]]; then
+    repo=${BASH_REMATCH[3]}
 fi
 [ -n "$repo" ] || exit 0
 
