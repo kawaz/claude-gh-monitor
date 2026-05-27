@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.5] - 2026-05-27
+
+### Fixed
+
+- `hooks/post_tool_use.sh`: `additionalContext` に埋める Monitor 起動コマンドの plugin root を literal `${CLAUDE_PLUGIN_ROOT}` から `$0` ベース resolve に変更。`additionalContext` は plugin loader の変数置換対象外で、Claude 本体が Monitor ツールに渡した時点でも置換されないため、watch-workflow が `bash /scripts/watch-workflow.sh ...` で起動して exit 127 になっていた。`session_start.sh` と同じ `SCRIPT_DIR=$(dirname $0)` 方式に統一
+
+### Documentation
+
+- `docs/findings/2026-05-27-claude-plugin-root-substitution-scope.md`: `${CLAUDE_PLUGIN_ROOT}` 置換スコープ表 (どこで置換され / どこでされないか) と実機検証結果を追加
+
 ## [0.3.4] - 2026-05-26
 
 ### Changed
