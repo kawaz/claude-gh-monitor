@@ -24,6 +24,13 @@
 
 set -u
 
+# plugin root の解決:
+# additionalContext は plugin loader の ${CLAUDE_PLUGIN_ROOT} 置換対象外なので、
+# Monitor 起動コマンドに埋める絶対パスを hook 内で resolve しておく。
+# session_start.sh と同じ $0 ベース方式で env 依存を避ける。
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+PLUGIN_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+
 input=$(cat)
 if [ -z "$input" ]; then
     exit 0
@@ -69,8 +76,9 @@ fi
 [ -n "$repo" ] || exit 0
 
 # additionalContext を JSON で返す
-# ${CLAUDE_PLUGIN_ROOT} はリテラルのまま埋める (Claude 本体が Monitor 起動時に解決)
-context="[gh-monitor] Monitor リストに 'watch-workflow: ${repo}' が無ければ、Monitor ツールで command=\`bash \${CLAUDE_PLUGIN_ROOT}/scripts/watch-workflow.sh ${repo}\`, description=\`watch-workflow: ${repo}\`, persistent=true を起動せよ。"
+# Monitor 起動コマンドのパスは hook 内で解決した絶対パスを使う (literal
+# ${CLAUDE_PLUGIN_ROOT} を埋めると Monitor 実行時に未定義で exit 127)
+context="[gh-monitor] Monitor リストに 'watch-workflow: ${repo}' が無ければ、Monitor ツールで command=\`bash ${PLUGIN_ROOT}/scripts/watch-workflow.sh ${repo}\`, description=\`watch-workflow: ${repo}\`, persistent=true を起動せよ。"
 
 jq -n --arg ctx "$context" '{
     hookSpecificOutput: {
