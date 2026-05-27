@@ -64,6 +64,10 @@ bump-semver level="patch":
 push: ensure-clean ci check-versions check-version-bump
     jj bookmark set main -r @-
     jj git push --bookmark main
+    @echo ""
+    @echo "[hint] plugin version bump を含む push です。ローカル Claude で反映するには:"
+    @echo "       1) claude-plugin-update.sh  # 全 CLAUDE_CONFIG_DIR の marketplace + plugin update"
+    @echo "       2) 既存セッションでは /reload-plugins  # 再起動なしで反映"
 
 # push（ドキュメント更新等のみで bump 不要な場合）
 push-without-bump: ensure-clean ci check-versions
