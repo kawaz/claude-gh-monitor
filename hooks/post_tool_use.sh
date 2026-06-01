@@ -75,10 +75,21 @@ if [[ "$url" =~ ^(https?://|ssh://(git@)?|git@)github\.com[:/]([A-Za-z0-9._-]+/[
 fi
 [ -n "$repo" ] || exit 0
 
+# push 直後の head SHA を解決 (SHA-pinned 起動用)
+# - HEAD は push されたコミットを指している前提
+# - hex 7..40 文字の SHA でなければ起動指示を出さない (= 不正な値での起動を避ける)
+head_sha=$(git -C "$workdir" rev-parse HEAD 2>/dev/null || true)
+if ! printf '%s' "$head_sha" | grep -Eq '^[0-9a-fA-F]{7,40}$'; then
+    exit 0
+fi
+sha7=$(printf '%s' "$head_sha" | cut -c1-7)
+
 # additionalContext を JSON で返す
 # Monitor 起動コマンドのパスは hook 内で解決した絶対パスを使う (literal
 # ${CLAUDE_PLUGIN_ROOT} を埋めると Monitor 実行時に未定義で exit 127)
-context="[gh-monitor] Monitor リストに 'watch-workflow: ${repo}' が無ければ、Monitor ツールで command=\`bash ${PLUGIN_ROOT}/scripts/watch-workflow.sh ${repo}\`, description=\`watch-workflow: ${repo}\`, persistent=true を起動せよ。"
+# SHA-pinned モードで起動 (= 指定 SHA の check が全 terminal + grace で自走 exit)。
+# 同 repo に SHA 違いが既に走っていても並列起動 OK (案 B、自然 exit 任せ)。
+context="[gh-monitor] Monitor リストに 'watch-workflow: ${repo}@${sha7}' が無ければ、Monitor ツールで command=\`bash ${PLUGIN_ROOT}/scripts/watch-workflow.sh --sha ${head_sha} ${repo}\`, description=\`watch-workflow: ${repo}@${sha7}\`, persistent=true を起動せよ。"
 
 jq -n --arg ctx "$context" '{
     hookSpecificOutput: {

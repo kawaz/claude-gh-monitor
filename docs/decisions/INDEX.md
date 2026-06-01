@@ -8,6 +8,7 @@ gh-monitor の設計判断記録一覧。ファイル名は `DR-NNNN-title.md` (
 - [DR-0002](./DR-0002-hook-minimal-output.md) — hook は「状態判定 + 1 行の Monitor 起動指示」に徹する (履歴蓄積抑制、重複防止は description マッチ)
 - [DR-0003](./DR-0003-watch-workflow-persistent-per-repo.md) — `watch-workflow` は repo 単位の常駐 Monitor 1 本 (PostToolUse hook で push 検出をトリガに起動)
 - [DR-0004](./DR-0004-suppress-self-originated-events.md) — 自セッション起因の comment / review / merge (watch-pr のみ) はデフォルト suppress、`GH_MONITOR_INCLUDE_SELF=1` で off。workflow run (watch-workflow) は改定で対象外に縮小
+- [DR-0005](./DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md) — `watch-workflow` に SHA-pinned モード追加 + Passive モード明示オプトイン化 (= DR-0003 を Passive 限定と再解釈、SHA-pinned 並列許可)
 
 ## Archived
 

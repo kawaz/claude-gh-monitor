@@ -21,7 +21,10 @@ GitHub の非同期イベント（PR の状態変化 + GitHub Actions workflow r
 
 - **Hook は最小指示だけ、Monitor 起動は Claude の仕事**: hook で直接常駐プロセスを起こさない（[DR-0002](docs/decisions/DR-0002-hook-minimal-output.md)）
 - **変化時のみ emit**: PR 全体ハッシュと CI ハッシュを独立管理し、不要な再通知を抑止
-- **repo 単位の常駐 Monitor**: watch-workflow は 1 repo = 1 Monitor で push ごとに増殖させない（[DR-0003](docs/decisions/DR-0003-watch-workflow-persistent-per-repo.md)）
+- **watch-workflow は 2 モード必須化**（[DR-0005](docs/decisions/DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md)）:
+  - **SHA-pinned** (`--sha`、第一推奨): 自分の push 用、`<repo>+<SHA>` 単位で並列許可、全 check terminal + grace で自走 exit。push のたびに増えても自然 exit
+  - **Passive** (`--passive` 明示必須): repo 全体監視、`<repo>` 単位で 1 本のみ ([DR-0003](docs/decisions/DR-0003-watch-workflow-persistent-per-repo.md) は Passive モードに限定と再解釈)、idle backoff + `--timeout`
+  - `--sha` も `--passive` も無い起動は exit 2 (誤起動の事前 guard)
 - **軽量**: Bash + gh + jq のみ。1 プロセス ~2MB
 
 ## 開発

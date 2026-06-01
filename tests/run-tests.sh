@@ -203,11 +203,162 @@ test_watch_workflow_emits_all_actors() {
 
     local out
     out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" WATCH_WORKFLOW_INTERVAL=1 \
-        timeout 3 bash "$repo_root/scripts/watch-workflow.sh" kawaz/test 2>&1 || true)
+        timeout 3 bash "$repo_root/scripts/watch-workflow.sh" --passive kawaz/test 2>&1 || true)
 
     assert_output "watch-workflow: emits all runs regardless of actor (DR-0004 改定)" "$out" \
         "$(printf 'user:self-bot\nuser:bob\n')" \
         "$(printf '[INFO] self filter:\n')"
+}
+
+# ============================================================
+# Test 5: watch-workflow.sh は mode 必須 (--sha も --passive も無い → exit 2)
+# ============================================================
+test_watch_workflow_mode_required() {
+    local stub_dir; stub_dir=$(mktemp -d)
+    trap 'rm -rf "$stub_dir"' RETURN
+    write_stub "$stub_dir/bin"
+
+    local out
+    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" \
+        bash "$repo_root/scripts/watch-workflow.sh" kawaz/test 2>&1 || true)
+
+    assert_output "watch-workflow: mode required (no --sha and no --passive)" "$out" \
+        "$(printf '[ERROR] mode required\n')" \
+        "$(printf '[INFO] watch-workflow start\n')"
+}
+
+# ============================================================
+# Test 6: watch-workflow.sh --sha は指定 SHA のみ emit、grace 後 exit
+# ============================================================
+fixture_runs_for_sha() {
+    local nowiso
+    nowiso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    cat <<JSON
+{"workflow_runs":[
+  {"id":2001,"status":"completed","conclusion":"success","name":"ci","head_sha":"deadbeefcafebabedeadbeefcafebabedeadbeef","head_branch":"feature/x","actor":{"login":"alice"},"event":"push","updated_at":"$nowiso"},
+  {"id":2002,"status":"completed","conclusion":"success","name":"ci","head_sha":"1111111111111111111111111111111111111111","head_branch":"feature/y","actor":{"login":"bob"},"event":"push","updated_at":"$nowiso"}
+]}
+JSON
+}
+
+test_watch_workflow_sha_pinned_filter_and_exit() {
+    local stub_dir; stub_dir=$(mktemp -d)
+    trap 'rm -rf "$stub_dir"' RETURN
+    write_stub "$stub_dir/bin"
+    fixture_runs_for_sha > "$stub_dir/runs-1.json"
+    fixture_runs_for_sha > "$stub_dir/runs-2.json"
+    fixture_runs_for_sha > "$stub_dir/runs-3.json"
+
+    local out
+    # grace=2s, interval=1s → 2 周後に grace 経過 → exit
+    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" WATCH_WORKFLOW_INTERVAL=1 \
+        timeout 8 bash "$repo_root/scripts/watch-workflow.sh" --sha deadbeefcafebabe --grace=2s kawaz/test 2>&1 || true)
+
+    assert_output "watch-workflow: --sha filters to matching commit + grace exit" "$out" \
+        "$(printf 'commit:deadbee\ngrace window elapsed, exiting\n')" \
+        "$(printf 'commit:1111111\n')"
+}
+
+# ============================================================
+# Test 7: codex review High-1 regression
+#   matching run が in_progress で観測 → 次 poll で page から消える (= per_page から押し出された
+#   想定) → exit してはいけない。matching_state に non-terminal が残ってる限り exit blocked
+# ============================================================
+fixture_runs_in_progress_sha() {
+    local nowiso
+    nowiso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    cat <<JSON
+{"workflow_runs":[
+  {"id":3001,"status":"in_progress","conclusion":null,"name":"ci","head_sha":"deadbeefcafebabedeadbeefcafebabedeadbeef","head_branch":"feature/x","actor":{"login":"alice"},"event":"push","updated_at":"$nowiso"}
+]}
+JSON
+}
+
+fixture_runs_empty() {
+    cat <<'JSON'
+{"workflow_runs":[]}
+JSON
+}
+
+test_watch_workflow_sha_pinned_no_exit_when_known_non_terminal_disappears() {
+    local stub_dir; stub_dir=$(mktemp -d)
+    trap 'rm -rf "$stub_dir"' RETURN
+    write_stub "$stub_dir/bin"
+    # 1 周目: in_progress 観測 → matching_state[3001]=in_progress
+    fixture_runs_in_progress_sha > "$stub_dir/runs-1.json"
+    # 2 周目以降: 空 (= 押し出された想定)
+    fixture_runs_empty > "$stub_dir/runs-2.json"
+    fixture_runs_empty > "$stub_dir/runs-3.json"
+    fixture_runs_empty > "$stub_dir/runs-4.json"
+    fixture_runs_empty > "$stub_dir/runs-5.json"
+
+    local out
+    # grace=1s, interval=1s, timeout=5s。in_progress が消えても exit すべきでない (= timeout で終わる)
+    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" WATCH_WORKFLOW_INTERVAL=1 \
+        timeout 8 bash "$repo_root/scripts/watch-workflow.sh" --sha deadbeefcafebabe --grace=1s --timeout=5s kawaz/test 2>&1 || true)
+
+    # in_progress を observed したが grace exit ではなく timeout で終わる
+    assert_output "watch-workflow: --sha does NOT exit when known non-terminal disappears from API window" "$out" \
+        "$(printf 'timeout reached')" \
+        "$(printf 'grace window elapsed, exiting\n')"
+}
+
+# ============================================================
+# Test 8: in_progress → success の state transition で grace 経過 → exit
+# ============================================================
+fixture_runs_completed_sha() {
+    local nowiso
+    nowiso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    cat <<JSON
+{"workflow_runs":[
+  {"id":3001,"status":"completed","conclusion":"success","name":"ci","head_sha":"deadbeefcafebabedeadbeefcafebabedeadbeef","head_branch":"feature/x","actor":{"login":"alice"},"event":"push","updated_at":"$nowiso"}
+]}
+JSON
+}
+
+test_watch_workflow_sha_pinned_state_transition_then_exit() {
+    local stub_dir; stub_dir=$(mktemp -d)
+    trap 'rm -rf "$stub_dir"' RETURN
+    write_stub "$stub_dir/bin"
+    # 1 周目: in_progress
+    fixture_runs_in_progress_sha > "$stub_dir/runs-1.json"
+    # 2 周目以降: success → 以降 grace 待ち
+    fixture_runs_completed_sha > "$stub_dir/runs-2.json"
+    fixture_runs_completed_sha > "$stub_dir/runs-3.json"
+    fixture_runs_completed_sha > "$stub_dir/runs-4.json"
+    fixture_runs_completed_sha > "$stub_dir/runs-5.json"
+
+    local out
+    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" WATCH_WORKFLOW_INTERVAL=1 \
+        timeout 10 bash "$repo_root/scripts/watch-workflow.sh" --sha deadbeefcafebabe --grace=2s --timeout=10s kawaz/test 2>&1 || true)
+
+    assert_output "watch-workflow: --sha in_progress -> success -> grace exit" "$out" \
+        "$(printf 'status:in_progress\nstatus:success\ngrace window elapsed, exiting\n')" \
+        ""
+}
+
+# ============================================================
+# Test 9: 値必須オプションの値抜けで exit 2 (codex review #2 regression)
+# ============================================================
+test_watch_workflow_flag_value_missing() {
+    local stub_dir; stub_dir=$(mktemp -d)
+    trap 'rm -rf "$stub_dir"' RETURN
+    write_stub "$stub_dir/bin"
+
+    local out
+    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" \
+        bash "$repo_root/scripts/watch-workflow.sh" --sha 2>&1 || true)
+
+    assert_output "watch-workflow: --sha without value exits 2" "$out" \
+        "$(printf '%s' '--sha requires a value')" \
+        ""
+
+    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" \
+        bash "$repo_root/scripts/watch-workflow.sh" --grace --passive kawaz/test 2>&1 || true)
+
+    assert_output "watch-workflow: --grace followed by --passive is value missing" "$out" \
+        "$(printf '%s' '--grace requires a value')" \
+        ""
 }
 
 # ============================================================
@@ -219,6 +370,11 @@ test_watch_pr_self_filter_on
 test_watch_pr_self_filter_off_by_env
 test_watch_pr_self_login_unavailable
 test_watch_workflow_emits_all_actors
+test_watch_workflow_mode_required
+test_watch_workflow_sha_pinned_filter_and_exit
+test_watch_workflow_sha_pinned_no_exit_when_known_non_terminal_disappears
+test_watch_workflow_sha_pinned_state_transition_then_exit
+test_watch_workflow_flag_value_missing
 
 echo ""
 echo "Results: $pass passed, $fail failed"
