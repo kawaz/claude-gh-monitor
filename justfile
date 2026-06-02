@@ -1,10 +1,25 @@
 # Claude Code Plugin: gh-monitor
+# Canonical task runner. VCS 操作は `bump-semver vcs` サブコマンド (DR-0020)
+# 経由で jj/git 透過化。claude-plugin-reference / bump-semver の justfile と
+# 同じ流儀。
+
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+# ---------- variables ----------
+
+# bump trigger 対象 = plugin 配布物の変更
+# = これらが変わったら version bump 必須 (docs/ 等のメタは除外)
+bump-trigger-paths := ".claude-plugin/ scripts/ hooks/ skills/"
+
+# version を持つ manifest ファイル (multi-file = 整合性チェック対象)
+version-files := ".claude-plugin/plugin.json .claude-plugin/marketplace.json"
+
+# ---------- main tasks ----------
 
 default:
     @just --list
 
-# shellcheck（scripts/ と hooks/ の .sh を検査）+ actionlint (.github/workflows/*.yml)
-# actionlint が未インストールでも lint 自体は失敗させない (warning 表示のみ)
+# shellcheck (scripts/ + hooks/) + actionlint (.github/workflows/)
 lint:
     shellcheck scripts/*.sh hooks/*.sh
     @if command -v actionlint >/dev/null 2>&1; then \
@@ -13,63 +28,67 @@ lint:
         echo "(actionlint not installed, skipping; install: brew install actionlint)" >&2; \
     fi
 
-# プラグイン manifest の検証
+# plugin manifest を検証
 validate:
     claude plugin validate .
 
-# バージョン表示（multi-file: 全ファイル一致時のみ成功）
+# 現在の version を表示 (multi-file 整合性チェック付き)
 version:
-    @bump-semver get .claude-plugin/plugin.json .claude-plugin/marketplace.json
+    @bump-semver get {{ version-files }} --no-hint
 
 # self filter (DR-0004) ほかの smoke test
 test:
     bash tests/run-tests.sh
 
-# CI とローカルの検査範囲を完全一致させる単一エントリ
+# CI とローカルの検査範囲を一致 (単一エントリ)
 ci: lint validate test
 
-# @ が empty（未コミット変更なし）であることを検証
-ensure-clean:
-    test "$(jj log -r @ --no-graph -T 'empty')" = "true"
+# version を bump (default: patch)
+bump-version level="patch": ensure-clean
+    bump-semver {{ level }} {{ version-files }} --write --no-hint
+    @echo "Version: -> $(bump-semver get {{ version-files }} --no-hint)"
 
-# plugin.json と marketplace.json のバージョン一致チェック
-# bump-semver get は multi-file 時に内部で整合チェック (不一致は error 表示で exit 非 0)
-check-versions:
-    @bump-semver get .claude-plugin/plugin.json .claude-plugin/marketplace.json >/dev/null
-
-# main@origin との差分があればバージョン bump が必須
-check-version-bump:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    remote_ver=$(jj file show .claude-plugin/plugin.json -r main@origin 2>/dev/null | jq -r '.version' 2>/dev/null || echo "")
-    local_ver=$(bump-semver get .claude-plugin/plugin.json)
-    if [ -z "$remote_ver" ]; then
-        exit 0  # main@origin が無い（初回 push）ならスキップ
-    fi
-    # @- と main@origin の間に差分があるのに version が同じなら bump 必要
-    diff_summary=$(jj diff --from main@origin --to @- --summary 2>/dev/null || echo "")
-    if [ "$local_ver" = "$remote_ver" ] && [ -n "$diff_summary" ]; then
-        echo "ERROR: 変更がありますがバージョンが未更新です ($local_ver)" >&2
-        echo "  bump するなら: just bump-semver [patch|minor|major]" >&2
-        echo "  bump 不要なら: just push-without-bump" >&2
-        exit 1
-    fi
-
-# バージョンバンプ（patch / minor / major）。multi-file 1 行で plugin.json / marketplace.json 一括更新
-bump-semver level="patch":
-    bump-semver "{{level}}" .claude-plugin/plugin.json .claude-plugin/marketplace.json --write
-    @echo "Version: -> $(bump-semver get .claude-plugin/plugin.json .claude-plugin/marketplace.json)"
-
-# push（バージョン bump 済みを前提、全チェック後に @- を push）
-push: ensure-clean ci check-versions check-version-bump
-    jj bookmark set main -r @-
-    jj git push --bookmark main
+# push (バージョン bump 済みを前提、全 gate 通過後に push)
+push: ensure-clean ci check-versions check-version-bumped
+    bump-semver vcs push --branch main --jj-bookmark-auto-advance
     @echo ""
     @echo "[hint] plugin version bump を含む push です。ローカル Claude で反映するには:"
     @echo "       1) claude-plugin-update.sh  # 全 CLAUDE_CONFIG_DIR の marketplace + plugin update"
     @echo "       2) 既存セッションでは /reload-plugins  # 再起動なしで反映"
 
-# push（ドキュメント更新等のみで bump 不要な場合）
+# push (ドキュメント更新等のみで bump 不要な場合)
 push-without-bump: ensure-clean ci check-versions
-    jj bookmark set main -r @-
-    jj git push --bookmark main
+    bump-semver vcs push --branch main --jj-bookmark-auto-advance
+
+# ---------- internal recipes (push の依存) ----------
+
+# working copy が clean (= @ が empty change) であることを検証
+[private]
+ensure-clean:
+    bump-semver vcs is clean
+
+# plugin.json と marketplace.json の version 一致を保証 (multi-file 整合性)
+# bump-semver get は multi-file 時に内部で整合チェック (不一致は error 表示で exit 非 0)
+[private]
+check-versions:
+    @bump-semver get {{ version-files }} --no-hint >/dev/null
+
+# bump-trigger-paths に変更があるなら version も bump されているか検証
+# bump-semver vcs diff の exit code:
+#   0 = bump-trigger-paths に変更なし → bump 不要
+#   1 = 変更あり → version bump 済みかチェックに進む
+#   3 = VCS error (main@origin 未 track 等)
+[private]
+check-version-bumped:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rc=0
+    bump-semver vcs diff -q main@origin -- {{ bump-trigger-paths }} || rc=$?
+    case "$rc" in
+      0) exit 0 ;;
+      1) ;;
+      *) echo "ERROR: bump-semver vcs diff failed (rc=$rc). main@origin が track されていない可能性。先に 'jj git fetch' / 'git fetch' を試してください" >&2; exit 1 ;;
+    esac
+    bump-semver compare gt .claude-plugin/plugin.json vcs:main@origin:.claude-plugin/plugin.json --no-hint && exit 0
+    echo 'ERROR: bump-trigger-paths が変わってるが version 未 bump。"just bump-version" を実行してください' >&2
+    exit 1
