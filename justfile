@@ -80,14 +80,14 @@ check-outdated-translations: ensure-clean
     bump-semver vcs outdated 'glob:**/*-ja.md' '$1/$2.md'
 
 # push 成功直後の local 反映: 現セッションの marketplace + plugin を update し
-# kawaz に /reload-plugins 依頼まで出す。push して終わりだと local Claude は
+# ユーザに /reload-plugins 依頼まで出す。push して終わりだと local Claude は
 # 古い plugin で動き続けるため、push task に embed して仕組みで強制する。
 [private]
 _local-plugin-reload:
     claude plugin marketplace update gh-monitor
     claude plugin update gh-monitor@gh-monitor
     @echo ""
-    @echo "[hint] kawaz, /reload-plugins で本セッションに反映してください (再起動なしで効きます)"
+    @echo "[hint] /reload-plugins to apply in this session without restart"
 
 # bump-trigger-paths に変更があるなら version も bump されているか検証
 # bump-semver vcs diff の exit code:

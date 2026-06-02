@@ -79,7 +79,7 @@ fi
 # - jj 管理リポでは `@` (working-copy) が空 commit のことが多く、`git rev-parse HEAD`
 #   はその空 commit を指す。実際に push されたのは `@-` (= 直前の non-empty commit)
 #   なので、empty SHA を pin すると CI run が存在せず no-match-timeout まで無駄常駐する
-#   (kawaz 環境は全リポ jj、push のたびに常時発生)。
+#   (jj 主体の環境では push のたびに常時発生)。
 # - 対策: `.jj` が存在し jj が PATH にあれば `latest(::@ & ~empty())` で `@` の祖先
 #   から最新の non-empty commit を取る。これは `@` が empty なら `@-` を返し、`@`
 #   自身が non-empty (= `jj new` 前) なら `@` を返す。どちらも push 対象と一致する。
