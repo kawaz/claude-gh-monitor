@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- `.github/workflows/release.yml`: 旧 `vcs:latest-tag()` 構文 (bump-semver v0.29.0 で削除済) を `bump-semver vcs tag latest --include-prerelease --vcs git` + `compare gt` の 2 段構えに置換 ([DR-0020](https://github.com/kawaz/bump-semver/blob/main/docs/decisions/DR-0020-pr-tag-latest.md))。現行 v0.31.1 で旧構文が exit 2 を返し、release.yml の case 文がそれを「初回 release 扱い」で握り潰すため、二重リリース防止の semver guard が完全無効化されていた (workflow は緑のまま、潜在バグ)。canonical (`kawaz/bump-semver/main/.github/workflows/release.yml`) と整合
+
+### Changed
+
+- `justfile`: jj 直書きから `bump-semver vcs` サブコマンド (DR-0020) ベースへ全面 refactor。jj/git 透過化。
+  - `ensure-clean`: `jj log -r @ -T empty` → `bump-semver vcs is clean`
+  - `check-version-bump` → `check-version-bumped`: 自前 `jj file show` + jq + `jj diff --summary` 手書きブロックを `bump-semver vcs diff -q main@origin -- <paths>` + `bump-semver compare gt <local> vcs:<ref>:<file>` に置換
+  - `push` / `push-without-bump`: `jj bookmark set + jj git push` → `bump-semver vcs push --branch main --jj-bookmark-auto-advance`
+  - recipe `bump-semver` → `bump-version` rename (コマンド名衝突解消)
+  - `version-files` / `bump-trigger-paths` を justfile 先頭で変数定義
+  - `check-versions` gate (plugin.json と marketplace.json の version 整合性) は維持
+
+## [0.4.1] - 2026-06-02
+
+### Added
+
+- `scripts/watch-workflow.sh`: SHA-pinned モードに `--no-match-timeout=<dur>` (default 10m) を追加。指定 SHA の matching run が API に現れないまま経過した場合に exit して、誤検出 / 未 push SHA の無駄常駐を防ぐ ([docs/issue/2026-06-02-sha-pinned-no-match-timeout-and-wrong-repo.md](docs/issue/2026-06-02-sha-pinned-no-match-timeout-and-wrong-repo.md))
+
+## [0.4.0] - 2026-06-01
+
+### Added
+
+- `scripts/watch-workflow.sh`: SHA-pinned モード (`--sha <SHA>`) を追加 ([DR-0005](docs/decisions/DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md))。指定 commit の workflow run を追跡し、全 check terminal + grace 経過で自走 exit。push のたびに増えても自然 exit するため、複数サブエージェント並列 watch でも RateLimit を圧迫しない
+
+### Changed
+
+- **Breaking**: `scripts/watch-workflow.sh` は mode 明示が必須化 (`--sha` または `--passive`)。どちらも無い起動は exit 2 (誤起動の事前 guard)
+- Passive モード (`--passive`) は明示オプトイン化。repo 全体監視 (`<repo>` 単位で 1 本のみ)、idle backoff + `--timeout` 経過で exit
+
 ## [0.3.5] - 2026-05-27
 
 ### Fixed
