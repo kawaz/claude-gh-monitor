@@ -53,6 +53,7 @@ persistent:  true
 - exit 条件: 指定 SHA に紐づく run が 1 つ以上観測されており、それら全てが terminal state (success/failure/cancelled/timed_out/action_required/skipped/neutral/stale/startup_failure)、かつ「最後に新規 matching run または state transition を観測してから grace window 経過 (デフォルト 60s)」
 - grace window は late-arriving run / `workflow_run` cascade / 後追い dispatch を取りこぼさないための救済
 - re-run policy: **監視中**に再実行された run はそのまま追う (terminal に戻るまで継続)。**自然 exit 後**の再実行は対象外 (必要なら再起動)
+- **no-match-timeout** (デフォルト 10m): 指定 SHA に紐づく run を一度も観測できないまま経過したら exit する。未 push の SHA / 誤検出 repo / workflow 不在 repo を pin した場合に 24h 張り付くのを防ぐ (= grace とは別パラメータ)
 - queue 詰まり等の救済として安全 timeout (デフォルト 24h) が走る
 
 ## Passive モード (明示的オプトイン)

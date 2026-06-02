@@ -260,6 +260,40 @@ test_watch_workflow_sha_pinned_filter_and_exit() {
 }
 
 # ============================================================
+# Test (no-match): matching run を一度も観測しなければ no-match-timeout で exit
+#   (issue 2026-06-02: 未 push SHA / 誤検出 repo / workflow 不在で 24h 張り付くのを防ぐ)
+# ============================================================
+fixture_runs_no_match() {
+    local nowiso
+    nowiso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    cat <<JSON
+{"workflow_runs":[
+  {"id":9001,"status":"completed","conclusion":"success","name":"ci","head_sha":"ffffffffffffffffffffffffffffffffffffffff","head_branch":"other","actor":{"login":"bob"},"event":"push","updated_at":"$nowiso"}
+]}
+JSON
+}
+
+test_watch_workflow_sha_pinned_no_match_timeout() {
+    local stub_dir; stub_dir=$(mktemp -d)
+    trap 'rm -rf "$stub_dir"' RETURN
+    write_stub "$stub_dir/bin"
+    # 指定 SHA に一致する run が存在しない (= 別 SHA の run しかない)
+    fixture_runs_no_match > "$stub_dir/runs-1.json"
+    fixture_runs_no_match > "$stub_dir/runs-2.json"
+    fixture_runs_no_match > "$stub_dir/runs-3.json"
+    fixture_runs_no_match > "$stub_dir/runs-4.json"
+
+    local out
+    # no-match-timeout=2s → matching 0 のまま 2s 経過で exit。timeout(safety)=20s より先に発火すること
+    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" WATCH_WORKFLOW_INTERVAL=1 \
+        timeout 10 bash "$repo_root/scripts/watch-workflow.sh" --sha deadbeefcafebabe --no-match-timeout=2s --timeout=20s kawaz/test 2>&1 || true)
+
+    assert_output "watch-workflow: --sha exits via no-match-timeout when SHA never appears" "$out" \
+        "$(printf 'no run found for SHA deadbee')" \
+        "$(printf 'timeout reached')"
+}
+
+# ============================================================
 # Test 7: codex review High-1 regression
 #   matching run が in_progress で観測 → 次 poll で page から消える (= per_page から押し出された
 #   想定) → exit してはいけない。matching_state に non-terminal が残ってる限り exit blocked
@@ -372,6 +406,7 @@ test_watch_pr_self_login_unavailable
 test_watch_workflow_emits_all_actors
 test_watch_workflow_mode_required
 test_watch_workflow_sha_pinned_filter_and_exit
+test_watch_workflow_sha_pinned_no_match_timeout
 test_watch_workflow_sha_pinned_no_exit_when_known_non_terminal_disappears
 test_watch_workflow_sha_pinned_state_transition_then_exit
 test_watch_workflow_flag_value_missing

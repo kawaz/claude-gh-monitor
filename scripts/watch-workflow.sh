@@ -25,6 +25,7 @@ passive=0
 grace_input="60s"
 timeout_input="24h"
 max_interval_input="10m"
+no_match_input="10m"
 repo=""
 
 usage() {
@@ -42,6 +43,7 @@ Common:
 
 SHA-pinned only:
   --grace=<duration>       Quiet period after all-terminal before exit (default 60s).
+  --no-match-timeout=<dur> Exit if no run for the SHA is ever observed within this window (default 10m).
   --exit-on-final          Accepted for compat (default in --sha mode).
 
 Passive only:
@@ -72,6 +74,8 @@ while [ $# -gt 0 ]; do
         --timeout=*)      timeout_input=${1#--timeout=}; shift ;;
         --max-interval)   _need_value "$1" "${2:-}"; max_interval_input=$2; shift 2 ;;
         --max-interval=*) max_interval_input=${1#--max-interval=}; shift ;;
+        --no-match-timeout)   _need_value "$1" "${2:-}"; no_match_input=$2; shift 2 ;;
+        --no-match-timeout=*) no_match_input=${1#--no-match-timeout=}; shift ;;
         --exit-on-final)  shift ;;
         -h|--help)        usage; exit 0 ;;
         --)               shift; break ;;
@@ -147,6 +151,9 @@ fi
 if ! max_interval_sec=$(parse_duration "$max_interval_input"); then
     echo "[ERROR] invalid --max-interval: $max_interval_input" >&2; exit 2
 fi
+if ! no_match_sec=$(parse_duration "$no_match_input"); then
+    echo "[ERROR] invalid --no-match-timeout: $no_match_input" >&2; exit 2
+fi
 
 #-----------------------------------------------------------------------------
 # 起動時パラメータ
@@ -160,7 +167,7 @@ fail_warn=5
 # mode に応じた起動 ack + cutoff (dispatch は $sha の有無で行うので mode 変数は持たない)
 if [ -n "$sha" ]; then
     sha7=$(printf '%s' "$sha" | cut -c1-7)
-    echo "[INFO] watch-workflow start: $repo (mode=sha-pinned sha=$sha7 grace=${grace_input} timeout=${timeout_input})"
+    echo "[INFO] watch-workflow start: $repo (mode=sha-pinned sha=$sha7 grace=${grace_input} no-match-timeout=${no_match_input} timeout=${timeout_input})"
     # SHA-pinned は cutoff 不要 (filter で絞られる)
     cutoff_epoch=0
 else
@@ -329,6 +336,16 @@ while true; do
             && [ $((now - start_epoch)) -ge "$matching_warn_threshold" ]; then
             printf '[WARN] no matching run for SHA %s after %ds. Check that the SHA is correct.\n' "$sha7" "$matching_warn_threshold"
             matching_warned=1
+        fi
+
+        # SHA-pinned: matching run を一度も観測しないまま no-match-timeout 経過 → exit
+        # (= 未 push SHA / 誤検出 repo / workflow 不在 repo を pin した場合に 24h 張り付くのを防ぐ。
+        #  issue 2026-06-02-sha-pinned-no-match-timeout-and-wrong-repo)
+        # grace (= terminal 集約後に late を待つ) とは別物: こちらは「1 つも現れない」を諦める閾値。
+        if [ "$observed_any_matching" -eq 0 ] \
+            && [ $((now - start_epoch)) -ge "$no_match_sec" ]; then
+            printf '[INFO] no run found for SHA %s after %s, exiting (wrong/unpushed SHA or no workflows?)\n' "$sha7" "$no_match_input"
+            exit 0
         fi
 
         # exit 条件 (codex review #1 反映、High-1 修正版):
