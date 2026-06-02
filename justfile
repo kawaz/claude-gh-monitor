@@ -51,14 +51,12 @@ bump-version level="patch": ensure-clean
 # push (バージョン bump 済みを前提、全 gate 通過後に push)
 push: ensure-clean ci check-outdated-translations check-versions check-version-bumped
     bump-semver vcs push --branch main --jj-bookmark-auto-advance
-    @echo ""
-    @echo "[hint] plugin version bump を含む push です。ローカル Claude で反映するには:"
-    @echo "       1) claude-plugin-update.sh  # 全 CLAUDE_CONFIG_DIR の marketplace + plugin update"
-    @echo "       2) 既存セッションでは /reload-plugins  # 再起動なしで反映"
+    @just _local-plugin-reload
 
 # push (ドキュメント更新等のみで bump 不要な場合)
 push-without-bump: ensure-clean ci check-outdated-translations check-versions
     bump-semver vcs push --branch main --jj-bookmark-auto-advance
+    @just _local-plugin-reload
 
 # ---------- internal recipes (push の依存) ----------
 
@@ -80,6 +78,16 @@ check-versions:
 [private]
 check-outdated-translations: ensure-clean
     bump-semver vcs outdated 'glob:**/*-ja.md' '$1/$2.md'
+
+# push 成功直後の local 反映: 現セッションの marketplace + plugin を update し
+# kawaz に /reload-plugins 依頼まで出す。push して終わりだと local Claude は
+# 古い plugin で動き続けるため、push task に embed して仕組みで強制する。
+[private]
+_local-plugin-reload:
+    claude plugin marketplace update gh-monitor
+    claude plugin update gh-monitor@gh-monitor
+    @echo ""
+    @echo "[hint] kawaz, /reload-plugins で本セッションに反映してください (再起動なしで効きます)"
 
 # bump-trigger-paths に変更があるなら version も bump されているか検証
 # bump-semver vcs diff の exit code:

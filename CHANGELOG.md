@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- `justfile`: `push` / `push-without-bump` の末尾に `_local-plugin-reload` を embed。push 成功直後に自セッションの marketplace + plugin を `claude plugin marketplace update gh-monitor` + `claude plugin update gh-monitor@gh-monitor` で update し、`/reload-plugins` 依頼を echo まで出す。push して終わりだと local Claude (現セッション) が古い plugin で動き続ける問題への対処を仕組みで強制 (= 旧 hint の `claude-plugin-update.sh` 一括スクリプト案内は撤去、現セッションだけ反映する方針)
+
 ## [0.4.3] - 2026-06-02
 
 ### Documentation
