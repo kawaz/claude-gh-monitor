@@ -2,7 +2,7 @@
 
 DR-0005 (= SHA-pinned モード) を実機運用して見つかった弱点。発見: 2026-06-02、claude-plugin-reference を push した際に hook が cmux-msg の未 push SHA を pin する起動指示を出した実例から。
 
-> **Status (2026-06-02)**: **問題 1 (no-match timeout) は実装済** (= `--no-match-timeout`、デフォルト 10m)。問題 2 (CLAUDE_PROJECT_DIR 誤検出) は問題 1 の実装で実害が緩和されたため、hook 側の根治は YAGNI として保留。
+> **Status (2026-06-02)**: **問題 1 (no-match timeout) は実装済** (= `--no-match-timeout`、デフォルト 10m、v0.4.1)。**問題 3 (jj HEAD ズレ) が未対応で優先度高** (= kawaz 全リポ jj なので push のたびに常時発生)。問題 2 (CLAUDE_PROJECT_DIR 越境誤検出) は問題 1 で実害緩和済、根治は YAGNI 保留。
 
 ## 問題 1: 存在しない SHA を pin すると 24h timeout まで無駄常駐
 
@@ -66,11 +66,56 @@ bash .../gh-monitor/0.4.0/scripts/watch-workflow.sh --sha 08ce34b9... kawaz/clau
 - (将来) hook が push コマンド文字列から `git -C <path>` / cwd を解析して実 repo を推定する。ただし複雑で誤爆も増えるため優先度低
 - (将来) hook が解決した repo に対して「最近 push されたか (= remote の HEAD が local HEAD と一致するか)」を軽くチェックしてから起動指示を出す
 
+## 問題 3: jj 環境で `git rev-parse HEAD` が empty working-copy commit を指す (= kawaz 環境では常時発生)
+
+### 現象
+
+`hooks/post_tool_use.sh` は push 後の対象 SHA を `git rev-parse HEAD` で解決する。しかし **jj 管理リポでは `@` (working-copy) が空の作業用 commit であることが多く、HEAD はその empty commit を指す**。実際に push されたのは `@-` (= 直前の実 commit) なので、hook は **存在しない / 無関係な SHA を pin** する。
+
+### 重要度: 高 (= 「軽微な誤検出」ではない)
+
+問題 2 (= 別 repo 誤検出) は越境作業時のみだが、**問題 3 は kawaz の全リポが jj 管理なので push のたびに常時発生する**。SHA-pinned hook はほぼ毎回 empty `@` の SHA を pin し、その SHA の CI run は存在しないため、no-match-timeout (10min) まで無駄 poll する。
+
+### 実例 (2026-06-02)
+
+cmux-msg を docs push (`just push` = `jj bookmark set main -r @-` 後に push) した直後、hook が:
+
+```
+bash .../scripts/watch-workflow.sh --sha 4ccdf841... kawaz/claude-cmux-msg
+```
+
+を起動指示。`4ccdf841` は jj の empty working-copy commit (`@`) の git SHA で、push された実 commit (`@-` = `dcf0d4d5`) ではない。`4ccdf841` の CI run は存在しないため no-match-timeout 待ちになる。
+
+### 改善案 (= 実装すべき、YAGNI ではない)
+
+`hooks/post_tool_use.sh` の SHA 解決を jj 対応にする:
+
+```bash
+head_sha=""
+if [ -d "$workdir/.jj" ] && command -v jj >/dev/null 2>&1; then
+    # @ から遡って最新の non-empty commit = 直前に作業/push した実 commit
+    head_sha=$(jj -R "$workdir" log -r 'latest(::@ & ~empty())' --no-graph -T 'commit_id' 2>/dev/null | head -1 || true)
+fi
+if [ -z "$head_sha" ]; then
+    head_sha=$(git -C "$workdir" rev-parse HEAD 2>/dev/null || true)  # 非 jj リポ fallback
+fi
+```
+
+- `latest(::@ & ~empty())` = `@` の祖先で空でない最新 commit (= 通常 `@-`、push 対象)
+- jj が PATH に無い / `.jj` が無ければ従来の `git rev-parse HEAD` に fallback
+- `commit_id` template は git commit hash (40 hex) を返す
+
+### 注意点 (= 実装時に詰める)
+
+- `@` 自体が non-empty (= まだ `jj new` していない作業中) の場合、`latest(::@ & ~empty())` は `@` を返す。これは push 対象と一致するとは限らない (= cmux-msg フローは `@-` を push) が、HEAD(empty) よりは遥かに正確
+- hook 実行環境の PATH に jj が含まれるか要確認 (= mise shim 等)。含まれなければ fallback で従来動作
+
 ## 推奨対応順
 
-1. **no-match timeout 実装** (= 問題 1、最優先)。誤検出 (問題 2) の害も同時に緩和できる
-2. DR-0005 の「将来の余地」or 「開いた問い」に問題 2 の hook 限界を明記
-3. 問題 2 の hook 側根治は YAGNI 判断 (= no-match timeout で実害が消えるなら後回し)
+1. **no-match timeout 実装** (= 問題 1、最優先) — ✅ 実装済 (v0.4.1)。誤検出 (問題 2/3) の害を緩和
+2. **問題 3 の jj 対応 hook 修正** — kawaz 環境では常時発生のため優先度高。実装すれば問題 2 (別 repo) でも「正しい repo の正しい SHA」を取れる確率が上がる
+3. DR-0005 / DR-0003 に問題 2/3 の hook 限界を明記
+4. 問題 2 の「別 repo 越境 push」根治は引き続き YAGNI (= no-match timeout + 問題 3 修正で実害が十分小さくなる)
 
 ## 関連
 
