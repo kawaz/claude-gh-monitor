@@ -19,58 +19,54 @@ grep -rln 'vcs:latest-tag' ~/.local/share/repos/github.com/kawaz/*/main/.github/
 
 その他 release.yml を持つ kawaz リポ (authsock-warden / hyoui / jj-worktree / port-peeker / stable-which / template-rust) は `vcs:latest-tag()` 不使用 (別パターンの release.yml、本 issue とは無関係)。
 
-## pkf-tasks 固有の注意点
+## pkf-tasks 固有の懸念 → 実機検証で解消 (= canonical 単純コピーで動く)
 
-pkf-tasks の release.yml は **monorepo-style tag** `pkf-tasks@X.Y.Z` も release 対象に含めている (release.yml の comments line 61, 170):
+pkf-tasks の release.yml は **monorepo-style tag** `pkf-tasks@X.Y.Z` も release 対象に含めている (release.yml の comments line 61, 170)。当初「新 `vcs tag latest` は SemVer 2.0.0 parse 必須なので `@` を含む tag は drop されるのでは」と懸念したが、**実機検証で否定された**。
+
+### 実機検証結果 (2026-06-02、pkf-tasks/main 上で)
+
+| 経路 | 出力 | exit |
+|---|---|---|
+| `bump-semver vcs tag latest --include-prerelease --vcs git` (git tag list) | `3.0.3` | 0 |
+| `bump-semver vcs tag latest --source release --include-prerelease --vcs git` | `3.0.3` | 0 |
+| `bump-semver vcs tag latest --source release --include-prerelease --repository kawaz/pkf-tasks` | `3.0.3` | 0 |
+
+ローカル checkout の git tag 状況:
+- PLAIN tag (`v3.0.3` / `v3.0.2`): 2 件 (= 最近の release で並行 push 開始)
+- MONO tag (`pkf-tasks@X.Y.Z`): 32 件
+
+**新 `vcs tag latest` は MONO tag も SemVer parse 成功** (= prefix `pkf-tasks@` を peel して `X.Y.Z` 部を SemVer として認識)。PLAIN tag があれば PLAIN、無くても MONO から最大を取れる。つまり gh-monitor で使った **canonical 単純コピー (`vcs tag latest` + `compare gt` の 2 段構え) でそのまま動く**。
+
+### 修正方針 (= gh-monitor 0.4.2 と完全同一パターン)
 
 ```yaml
-# vcs:latest-tag() は monorepo-style `pkf-tasks@X.Y.Z` も @ peel fallback で認識
+# 既存 tag より大きいか (二重リリース防止)
+# bump-semver v0.29.0 (DR-0020) で vcs:latest-tag() 削除済 → vcs tag latest へ移行
+# pkf-tasks の monorepo-style tag (pkf-tasks@X.Y.Z) も SemVer parse 成功する
+# ことを 2026-06-02 実機検証済 (docs/issue/2026-06-02-pkf-tasks-release-yml-latest-tag-bug.md)
 set +e
-bump-semver compare gt "$CURRENT_VERSION" 'vcs:latest-tag()' --vcs git
+LATEST=$(bump-semver vcs tag latest --include-prerelease --vcs git 2>/dev/null)
+LATEST_EXIT=$?
+set -e
+if [ "$LATEST_EXIT" -ne 0 ]; then
+  echo "::notice::vcs tag latest exited ${LATEST_EXIT} (no SemVer tags yet); assuming first release."
+else
+  set +e
+  bump-semver compare gt "$CURRENT_VERSION" "$LATEST"
+  CMP_EXIT=$?
+  set -e
+  case "$CMP_EXIT" in
+    0) ;;
+    1) echo "changed=false" >> "$GITHUB_OUTPUT"
+       echo "Version v${CURRENT_VERSION} is not greater than latest tag ${LATEST}; skipping release."
+       exit 0 ;;
+    *) echo "::error::Unexpected exit code from bump-semver compare: ${CMP_EXIT}"
+       exit 1 ;;
+  esac
+fi
 ```
 
-旧 `vcs:latest-tag()` は @ peel fallback でこの monorepo-style を拾うが、**新 `bump-semver vcs tag latest --include-prerelease` は SemVer 2.0.0 parse 必須**:
-
-- `pkf-tasks@X.Y.Z` は `@` を含むため SemVer 2.0.0 として parse 不能 → drop される
-- monorepo-style tag のみが存在する状態だと exit 3 (no semver tags) → first-release 扱いに流れる → guard が gh-monitor 修正前と同じく無効化
-
-つまり **gh-monitor で使った canonical 単純コピーは pkf-tasks では動作差が出る**。
-
-### 修正候補
-
-1. **prefix strip オプション追加 (bump-semver 側)**: `bump-semver vcs tag latest --strip-prefix=pkf-tasks@` のように tag prefix を剥がしてから parse。bump-semver の DR が必要、影響範囲大
-2. **pkf-tasks 側で peel 自前**: `git tag | sed 's/^pkf-tasks@//' | bump-semver vcs tag latest --vcs git --raw-input` 的な経路を新設 (= bump-semver 側に raw-input mode が必要)
-3. **monorepo-style tag を主から外し PLAIN `v<version>` のみを guard 対象にする**: release.yml の運用変更。コメント (line 170-173) が「PLAIN こそが本来の基本形」と明記しているので方針整合性あり、guard としては PLAIN だけ見れば十分。最も小さい修正
-4. **vcs:latest-tag() を残し bump-semver を旧構文互換に戻す**: NG (DR-0020 で削除済、戻すと bump-semver 設計の後退)
-
-候補 3 が最も筋が良さそう (= release.yml の他コメントとも整合):
-
-```yaml
-- name: Check version & create release
-  run: |
-    ...
-    # PLAIN tag (= v<version>) を対象に guard。monorepo-style pkf-tasks@X.Y.Z は
-    # 別経路で push、guard 対象外 (PLAIN の方が canonical)
-    set +e
-    LATEST=$(bump-semver vcs tag latest --include-prerelease --vcs git 2>/dev/null)
-    LATEST_EXIT=$?
-    set -e
-    if [ "$LATEST_EXIT" -ne 0 ]; then
-      echo "::notice::no SemVer tags yet; assuming first release."
-    else
-      set +e
-      bump-semver compare gt "$CURRENT_VERSION" "$LATEST"
-      CMP_EXIT=$?
-      set -e
-      case "$CMP_EXIT" in
-        0) ;;
-        1) echo "changed=false" >> "$GITHUB_OUTPUT"; ...; exit 0 ;;
-        *) echo "::error::compare error"; exit 1 ;;
-      esac
-    fi
-```
-
-ただし「monorepo-style tag が guard 対象から外れる」trade-off を pkf-tasks 関係者と合意する必要あり (= 同 version の重複 release は PLAIN tag の guard で防げるが、monorepo style だけが先に作られた状態は素通りする)。
+`--include-prerelease` は旧構文との byte-identical 互換のため明示 (旧実装は prerelease を含めていた)。fetch-depth: 0 は既存維持。release.yml の comments (line 61, 170) も合わせて更新 (= 旧 `vcs:latest-tag()` の言及を削除 / `vcs tag latest` で全 tag を SemVer parse する旨に変更)。
 
 ## 実害
 
