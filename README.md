@@ -72,7 +72,14 @@ Example emits (`[scope:action] key:value` format):
 
 ### Skill: `watch-workflow`
 
-One persistent Monitor per repo runs `watch-workflow.sh` and emits a single line whenever a GitHub Actions workflow run changes state. The Monitor description follows the `watch-workflow: <owner/repo>` convention. A 5-minute lookback from the start time is used as the baseline cutoff so that fast CI runs are still surfaced on the first poll ([DR-0003](docs/decisions/DR-0003-watch-workflow-persistent-per-repo.md)).
+`watch-workflow.sh` runs as a Monitor and emits a single line whenever a GitHub Actions workflow run changes state. Two modes ([DR-0005](docs/decisions/DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md)):
+
+| Mode | When | Exit condition |
+|---|---|---|
+| **SHA-pinned** (recommended for own work) | Track a specific commit you just pushed. Triggered automatically by the PostToolUse hook | All checks for the SHA reach terminal state + grace window (default 60s) elapses; or `--no-match-timeout` (default 10m) if no matching run is ever observed |
+| Passive (opt-in) | Watch the repo as a whole, including others' pushes. Idle backoff (initial 30s → up to `--max-interval`) | `--timeout` elapses (default 24h) or manual stop |
+
+A mode flag is **required** (`--sha <SHA>` or `--passive`); a bare invocation exits 2 as a guard against accidental long-running pollers. SHA-pinned launches are **parallel-safe** for the same repo (different SHAs use distinct Monitor descriptions and exit naturally); Passive is one-per-repo ([DR-0003](docs/decisions/DR-0003-watch-workflow-persistent-per-repo.md) reinterpreted as Passive-only). Monitor descriptions follow `watch-workflow: <owner/repo>@<sha7>` (SHA-pinned) / `watch-workflow: <owner/repo>` (Passive). A 5-minute lookback from start time is used as the baseline cutoff so fast CI runs are still surfaced on the first poll.
 
 Example emit:
 
@@ -112,7 +119,7 @@ just ci                  # lint + validate + test (matches CI exactly)
 just lint                # shellcheck (scripts/ hooks/) + actionlint (.github/workflows)
 just test                # tests/run-tests.sh (gh-stubbed smoke tests, no bats required)
 just version             # show current version
-just bump-semver         # patch bump (pass `minor` / `major` for level)
+just bump-version        # patch bump (pass `minor` / `major` for level)
 just push                # run all checks + version bump detection + push
 just push-without-bump   # for docs-only changes where no bump is required
 ```

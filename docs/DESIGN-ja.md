@@ -45,7 +45,7 @@
 | 2 | 配布形態 | Claude Code Plugin（`.claude-plugin/` + `marketplace.json`）| — |
 | 3 | 機能構成 | `watch-pr` + `watch-workflow` の 2 本立て | [DR-0001](decisions/DR-0001-rename-and-scope-expand.md) |
 | 4 | hook の責務 | 「状態判定 + 1 行の Monitor 起動指示」に徹する | [DR-0002](decisions/DR-0002-hook-minimal-output.md) |
-| 5 | workflow 監視の起動戦略 | repo 単位の常駐 Monitor 1 本（PostToolUse hook で push 検出をトリガに起動）| [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md) |
+| 5 | workflow 監視の起動戦略 | 2 モード: **SHA-pinned** (自分作業の第一推奨、SHA 単位並列許可、全 check terminal + grace で自動 exit) と **Passive** (明示オプトイン、repo 全体、1 本制限、idle backoff)。PostToolUse hook が push 検知で SHA-pinned を自動起動。DR-0003 の「repo 単位 1 本」は Passive 限定と再解釈 | [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md) / [DR-0005](decisions/DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md) |
 | 6 | セッション間の干渉 | 各セッション独立（Bash で 1 プロセス ~2MB なのでロック機構は不要）| — |
 | 7 | 実装言語 | Bash + `gh` + `jq`（メモリ効率重視。Bun/TS 検討もしたが 1 プロセス ~2MB 優位）| — |
 | 8 | 自セッション起因イベントの扱い | watch-pr の comment / review / merge のみデフォルト suppress（`GH_MONITOR_INCLUDE_SELF=1` で off）。workflow run は対象外（改定）| [DR-0004](decisions/DR-0004-suppress-self-originated-events.md) |
@@ -107,16 +107,20 @@
 [Monitor リストに `watch-workflow: <user/repo>` が無ければ起動]
         │
         ▼
-[Monitor ツール] で [scripts/watch-workflow.sh] を repo 単位で 1 本常駐起動
-        │
+[Monitor ツール] で [scripts/watch-workflow.sh] を常駐起動
+        │       SHA-pinned (hook 経由のデフォルト): 1 commit を追跡、SHA 単位で並列許可
+        │       Passive (オプトイン): repo 単位 1 本、idle backoff (DR-0003)
         ▼ 30s+ ごと
 [gh run list ... --json] → [起動時刻 lookback で baseline 構築 → 状態変化のみ emit]
         │
         ▼
 [stdout に 1 行] → Claude に通知
+        │
+        ▼ SHA-pinned: 指定 SHA の全 check が terminal + grace 経過
+[自動 exit]   Passive: --timeout 経過
 ```
 
-詳細は [DR-0002](decisions/DR-0002-hook-minimal-output.md) / [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md)。
+詳細は [DR-0002](decisions/DR-0002-hook-minimal-output.md) / [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md) / [DR-0005](decisions/DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md)。
 
 ### コンポーネント
 
@@ -196,7 +200,8 @@
 #### 起動 ack
 
 ```
-[INFO] watch-workflow start: kawaz/foo (interval=30s, lookback=5m)
+[INFO] watch-workflow start: kawaz/foo (mode=sha-pinned sha=abc1234 grace=60s no-match-timeout=10m timeout=24h)
+[INFO] watch-workflow start: kawaz/foo (mode=passive max-interval=10m timeout=24h)
 ```
 
 #### 変化検出時に出る行
@@ -212,7 +217,7 @@
 [INFO] gh api が復旧 (5 回失敗のあと)
 ```
 
-`status` の語彙は gh 準拠（`queued` / `in_progress` / `success` / `failure` / `cancelled` / `skipped` / `timed_out` / `action_required` 等をフラット化）。詳細は [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md)。
+`status` の語彙は gh 準拠（`queued` / `in_progress` / `success` / `failure` / `cancelled` / `skipped` / `timed_out` / `action_required` 等をフラット化）。詳細は [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md) / [DR-0005](decisions/DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md)。
 
 ---
 
@@ -226,13 +231,15 @@
 
 ### watch-workflow ✅ 実装済み
 
-- 設計判断は [DR-0001](decisions/DR-0001-rename-and-scope-expand.md) / [DR-0002](decisions/DR-0002-hook-minimal-output.md) / [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md)
+- 設計判断は [DR-0001](decisions/DR-0001-rename-and-scope-expand.md) / [DR-0002](decisions/DR-0002-hook-minimal-output.md) / [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md) / [DR-0005](decisions/DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md)
 - DR-0003 の emit format からの差分: gh 2.92.0 の `gh run list --json` に `actor` field が無いため `gh api /repos/<owner>/<repo>/actions/runs?per_page=100` 経路に切り替え、`actor.login` と `event` の両方を emit に含める形に確定 (2026-05-26 実装時調整)
+- SHA-pinned + Passive mode 必須化 (DR-0005): v0.4.0 で追加。matching run を一度も観測しないまま終わる場合の `--no-match-timeout` (デフォルト 10m) は v0.4.1 で追加。PostToolUse hook の jj-aware SHA 解決 (= empty working-copy commit を pin しない) は v0.4.2 で追加
 
 ### 追加の改善候補（将来）
 
 - `[CI]` 行で PR check の URL まで含める（failure 時に深堀りが速い）
-- `watch-workflow.sh` のオプション (`--only-mine` / `--workflow` / `--events`)。[DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md) の「将来の拡張余地」参照
+- 同一 repo を見る並列セッション間で API キャッシュを共有 (effective gh API 呼び回数を抑制): [docs/issue/2026-06-02-shared-cache-layer.md](issue/2026-06-02-shared-cache-layer.md)
+- ノイジーな bot 連投 / CI 中間遷移を任意で suppress: [docs/issue/2026-05-26-suppress-noise-followups.md](issue/2026-05-26-suppress-noise-followups.md)
 - 手動起動用 invocable skill (`/gh-monitor:watch-ci` 等)
 
 ---

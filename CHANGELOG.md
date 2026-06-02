@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.3] - 2026-06-02
+
+### Documentation
+
+- `README.md` / `README-ja.md`: `watch-workflow` セクションを DR-0005 (SHA-pinned + Passive opt-in) 反映に書き換え。2 モード表 / mode 必須 / parallel-safe / `--no-match-timeout` を README レベルで案内。`just bump-semver` の case を `just bump-version` (justfile refactor で改名済) に追従
+- `docs/DESIGN.md` / `docs/DESIGN-ja.md`: 表 row 5 / アーキ図 / start ack 例 / Status 注記 / Future improvements を DR-0005 反映に更新。Future の `--only-mine` / `--workflow` / `--events` 案 (DR-0003 の旧 future) は SHA-pinned/Passive 2-mode に上書きされたため削除、代わりに既存 docs/issue (shared-cache-layer / suppress-noise-followups) へのリンクで残置案を整理
+- `skills/watch-workflow/SKILL.md`: 削除済 issue (`2026-06-01-watch-workflow-sha-pinned-and-passive-mode.md`) への dead link を [DR-0005](../../docs/decisions/DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md) に張り替え。DR-0003 を「Passive 限定と再解釈」の nuance も残置
+
+### Changed
+
+- `justfile`: canonical (`kawaz/bump-semver/main/justfile`) に揃え、push 経路に `check-outdated-translations` ([DR-0027/DR-0028](https://github.com/kawaz/bump-semver/blob/main/docs/decisions/)) を追加。`bump-semver vcs outdated 'glob:**/*-ja.md' '$1/$2.md'` で README/DESIGN 等の en/ja 翻訳ペアが derived (en) ≥ source (ja) を維持していることを push 前に強制 (= 翻訳ドリフトを CI ネットで捕まえる)
+
 ## [0.4.2] - 2026-06-02
 
 ### Fixed

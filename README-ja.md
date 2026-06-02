@@ -72,7 +72,14 @@ emit 例 (`[scope:action] key:value` 形式):
 
 ### Skill: `watch-workflow`
 
-repo ごとに 1 本の Monitor で `watch-workflow.sh` を常駐させ、GitHub Actions workflow run の状態変化を 1 行 emit します。Monitor description は `watch-workflow: <owner/repo>` 規約。起動時刻 - 5 分を cutoff として fast CI も初回 emit に救います ([DR-0003](docs/decisions/DR-0003-watch-workflow-persistent-per-repo.md))。
+`watch-workflow.sh` を Monitor で常駐させ、GitHub Actions workflow run の状態変化を 1 行 emit します。2 モード ([DR-0005](docs/decisions/DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md)):
+
+| モード | 用途 | 終了条件 |
+|---|---|---|
+| **SHA-pinned** (自分作業の第一推奨) | 自分が push した特定 commit を追跡。PostToolUse hook が自動起動 | 指定 SHA の全 check が terminal state + grace window (デフォルト 60s) 経過。もしくは matching run を一度も観測できない場合 `--no-match-timeout` (デフォルト 10m) で exit |
+| Passive (明示オプトイン) | repo 全体を見守る (他人 push も含む)。idle backoff (初期 30s → `--max-interval` 上限) | `--timeout` (デフォルト 24h) 経過 or 手動 stop |
+
+mode は **必須** (`--sha <SHA>` or `--passive`)。指定なしの起動は exit 2 (誤起動の事前 guard)。SHA-pinned は同 repo でも **並列許可** (description が SHA 違いで重複しない、自然 exit するので積み上がらない)、Passive は repo 単位 1 本 ([DR-0003](docs/decisions/DR-0003-watch-workflow-persistent-per-repo.md) を Passive 限定と再解釈)。Monitor description は `watch-workflow: <owner/repo>@<sha7>` (SHA-pinned) / `watch-workflow: <owner/repo>` (Passive)。起動時刻 - 5 分を cutoff として fast CI も初回 emit に救います。
 
 emit 例:
 
@@ -112,7 +119,7 @@ just ci                  # lint + validate + test (CI と同一)
 just lint                # shellcheck (scripts/ hooks/) + actionlint (.github/workflows)
 just test                # tests/run-tests.sh (gh stubbed smoke tests, bats 不要)
 just version             # バージョン表示
-just bump-semver         # patch bump (minor / major も引数で指定可)
+just bump-version        # patch bump (minor / major も引数で指定可)
 just push                # 全チェック + version bump 検出 + push
 just push-without-bump   # docs only 等で bump 不要な場合
 ```

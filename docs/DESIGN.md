@@ -45,7 +45,7 @@ The canonical record of design decisions is [docs/decisions/INDEX.md](decisions/
 | 2 | Distribution | Claude Code Plugin (`.claude-plugin/` + `marketplace.json`) | — |
 | 3 | Feature split | Two skills: `watch-pr` + `watch-workflow` | [DR-0001](decisions/DR-0001-rename-and-scope-expand.md) |
 | 4 | Hook responsibility | Limited to "state detection + one-line Monitor launch instruction" | [DR-0002](decisions/DR-0002-hook-minimal-output.md) |
-| 5 | Workflow-watch launch strategy | One persistent Monitor per repo (triggered by PostToolUse hook detecting push) | [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md) |
+| 5 | Workflow-watch launch strategy | Two modes: **SHA-pinned** (recommended for own work, parallel-safe per SHA, auto-exits when all checks terminal + grace) and **Passive** (opt-in, repo-wide, one-per-repo, idle backoff). PostToolUse hook starts SHA-pinned automatically on push. DR-0003's one-per-repo rule is reinterpreted as Passive-only | [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md) / [DR-0005](decisions/DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md) |
 | 6 | Cross-session interference | Each session is independent (1 process ~2 MB in Bash, no locking needed) | — |
 | 7 | Implementation language | Bash + `gh` + `jq` (memory-efficient; Bun/TS were considered but the 1 process ~2 MB profile wins) | — |
 | 8 | Self-originated events | watch-pr only: comments / reviews / merges suppressed by default (`GH_MONITOR_INCLUDE_SELF=1` to disable). workflow runs are not filtered (revised) | [DR-0004](decisions/DR-0004-suppress-self-originated-events.md) |
@@ -107,16 +107,20 @@ Measured: Bash ~2 MB / Bun ~22 MB / Node ~46 MB. Bash chosen for many parallel s
 [Start a Monitor if `watch-workflow: <user/repo>` is not already in the list]
         │
         ▼
-[Monitor tool] runs [scripts/watch-workflow.sh] persistently, one per repo
-        │
+[Monitor tool] runs [scripts/watch-workflow.sh] persistently
+        │       SHA-pinned (default for hook-driven launch): tracks one commit, parallel-safe per SHA
+        │       Passive (opt-in): one-per-repo, idle backoff (DR-0003)
         ▼ every 30s+
 [gh api .../actions/runs] → [build baseline with start-time lookback, emit only on state change]
         │
         ▼
 [emit 1 line to stdout] → notification to Claude
+        │
+        ▼ SHA-pinned: all SHA's checks reach terminal + grace window elapsed
+[auto-exit]   Passive: --timeout elapsed
 ```
 
-Details: [DR-0002](decisions/DR-0002-hook-minimal-output.md) / [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md).
+Details: [DR-0002](decisions/DR-0002-hook-minimal-output.md) / [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md) / [DR-0005](decisions/DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md).
 
 ### Components
 
@@ -196,7 +200,8 @@ Minor edits to an existing comment body (typo fixes, etc.) do not trigger emit. 
 #### Start ack
 
 ```
-[INFO] watch-workflow start: kawaz/foo (interval=30s, lookback=5m)
+[INFO] watch-workflow start: kawaz/foo (mode=sha-pinned sha=abc1234 grace=60s no-match-timeout=10m timeout=24h)
+[INFO] watch-workflow start: kawaz/foo (mode=passive max-interval=10m timeout=24h)
 ```
 
 #### Lines emitted on change
@@ -212,7 +217,7 @@ Minor edits to an existing comment body (typo fixes, etc.) do not trigger emit. 
 [INFO] gh api が復旧 (5 回失敗のあと)
 ```
 
-The `status` vocabulary follows `gh` (`queued` / `in_progress` / `success` / `failure` / `cancelled` / `skipped` / `timed_out` / `action_required`, etc., flattened). Details: [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md).
+The `status` vocabulary follows `gh` (`queued` / `in_progress` / `success` / `failure` / `cancelled` / `skipped` / `timed_out` / `action_required`, etc., flattened). Details: [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md) / [DR-0005](decisions/DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md).
 
 ---
 
@@ -226,13 +231,15 @@ The `status` vocabulary follows `gh` (`queued` / `in_progress` / `success` / `fa
 
 ### watch-workflow ✅ implemented
 
-- Design decisions: [DR-0001](decisions/DR-0001-rename-and-scope-expand.md) / [DR-0002](decisions/DR-0002-hook-minimal-output.md) / [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md)
+- Design decisions: [DR-0001](decisions/DR-0001-rename-and-scope-expand.md) / [DR-0002](decisions/DR-0002-hook-minimal-output.md) / [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md) / [DR-0005](decisions/DR-0005-watch-workflow-sha-pinned-and-passive-opt-in.md)
 - Delta from DR-0003's emit format: `gh run list --json` in gh 2.92.0 does not expose the `actor` field, so the poll path switched to `gh api /repos/<owner>/<repo>/actions/runs?per_page=100`, and the emit was finalized to include both `actor.login` and `event` (adjustment made during implementation on 2026-05-26)
+- SHA-pinned + Passive mode-required (DR-0005): added in v0.4.0; `--no-match-timeout` (default 10m) to bail out on never-observed SHAs added in v0.4.1; jj-aware SHA resolution in the PostToolUse hook (avoid pinning the empty working-copy commit) added in v0.4.2
 
 ### Future improvements
 
 - Include the PR check URL in `[CI]` lines (faster drill-down on failure)
-- `watch-workflow.sh` options (`--only-mine` / `--workflow` / `--events`). See "Future extensibility" in [DR-0003](decisions/DR-0003-watch-workflow-persistent-per-repo.md)
+- Shared cache layer across sessions watching the same repo to cap effective `gh` API calls (see [docs/issue/2026-06-02-shared-cache-layer.md](issue/2026-06-02-shared-cache-layer.md))
+- Suppress noisy bot reposts / CI intermediate transitions on demand (see [docs/issue/2026-05-26-suppress-noise-followups.md](issue/2026-05-26-suppress-noise-followups.md))
 - Invocable skill for manual start (e.g., `/gh-monitor:watch-ci`)
 
 ---

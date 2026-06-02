@@ -49,7 +49,7 @@ bump-version level="patch": ensure-clean
     @echo "Version: -> $(bump-semver get {{ version-files }} --no-hint)"
 
 # push (バージョン bump 済みを前提、全 gate 通過後に push)
-push: ensure-clean ci check-versions check-version-bumped
+push: ensure-clean ci check-outdated-translations check-versions check-version-bumped
     bump-semver vcs push --branch main --jj-bookmark-auto-advance
     @echo ""
     @echo "[hint] plugin version bump を含む push です。ローカル Claude で反映するには:"
@@ -57,7 +57,7 @@ push: ensure-clean ci check-versions check-version-bumped
     @echo "       2) 既存セッションでは /reload-plugins  # 再起動なしで反映"
 
 # push (ドキュメント更新等のみで bump 不要な場合)
-push-without-bump: ensure-clean ci check-versions
+push-without-bump: ensure-clean ci check-outdated-translations check-versions
     bump-semver vcs push --branch main --jj-bookmark-auto-advance
 
 # ---------- internal recipes (push の依存) ----------
@@ -72,6 +72,14 @@ ensure-clean:
 [private]
 check-versions:
     @bump-semver get {{ version-files }} --no-hint >/dev/null
+
+# 翻訳ペア (README-ja.md ↔ README.md, DESIGN-ja.md ↔ DESIGN.md 等) の鮮度チェック
+# FROM = ja 版 (= source、日本語で先に書く)、TO = $1/$2.md (= en 版、derived)
+# en 版が ja 版より古いと exit 1 (stale)。canonical (bump-semver / claude-plugin-reference)
+# と同じ glob 規約。
+[private]
+check-outdated-translations: ensure-clean
+    bump-semver vcs outdated 'glob:**/*-ja.md' '$1/$2.md'
 
 # bump-trigger-paths に変更があるなら version も bump されているか検証
 # bump-semver vcs diff の exit code:
