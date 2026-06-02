@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- `hooks/post_tool_use.sh`: jj 管理リポで `git rev-parse HEAD` が working-copy の empty commit を指して watch-workflow が存在しない SHA を pin する問題を修正 ([docs/issue/2026-06-02-sha-pinned-no-match-timeout-and-wrong-repo.md](docs/issue/2026-06-02-sha-pinned-no-match-timeout-and-wrong-repo.md) 問題3)。`.jj` が存在し jj が PATH にあれば `jj log -r 'latest(::@ & ~empty())' -T commit_id` で `@` の祖先から最新 non-empty commit (= push 対象) を解決、jj 不在 / 非 jj リポは従来通り `git rev-parse HEAD` で fallback。kawaz 環境は全リポ jj 管理なので push のたびに常時発生していた潜在バグ
 - `.github/workflows/release.yml`: 旧 `vcs:latest-tag()` 構文 (bump-semver v0.29.0 で削除済) を `bump-semver vcs tag latest --include-prerelease --vcs git` + `compare gt` の 2 段構えに置換 ([DR-0020](https://github.com/kawaz/bump-semver/blob/main/docs/decisions/DR-0020-pr-tag-latest.md))。現行 v0.31.1 で旧構文が exit 2 を返し、release.yml の case 文がそれを「初回 release 扱い」で握り潰すため、二重リリース防止の semver guard が完全無効化されていた (workflow は緑のまま、潜在バグ)。canonical (`kawaz/bump-semver/main/.github/workflows/release.yml`) と整合
 
 ### Changed

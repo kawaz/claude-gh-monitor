@@ -76,9 +76,22 @@ fi
 [ -n "$repo" ] || exit 0
 
 # push 直後の head SHA を解決 (SHA-pinned 起動用)
-# - HEAD は push されたコミットを指している前提
+# - jj 管理リポでは `@` (working-copy) が空 commit のことが多く、`git rev-parse HEAD`
+#   はその空 commit を指す。実際に push されたのは `@-` (= 直前の non-empty commit)
+#   なので、empty SHA を pin すると CI run が存在せず no-match-timeout まで無駄常駐する
+#   (kawaz 環境は全リポ jj、push のたびに常時発生)。
+# - 対策: `.jj` が存在し jj が PATH にあれば `latest(::@ & ~empty())` で `@` の祖先
+#   から最新の non-empty commit を取る。これは `@` が empty なら `@-` を返し、`@`
+#   自身が non-empty (= `jj new` 前) なら `@` を返す。どちらも push 対象と一致する。
+# - jj 不在 / 非 jj リポは従来通り `git rev-parse HEAD` で fallback。
 # - hex 7..40 文字の SHA でなければ起動指示を出さない (= 不正な値での起動を避ける)
-head_sha=$(git -C "$workdir" rev-parse HEAD 2>/dev/null || true)
+head_sha=""
+if [ -d "$workdir/.jj" ] && command -v jj >/dev/null 2>&1; then
+    head_sha=$(jj -R "$workdir" log -r 'latest(::@ & ~empty())' --no-graph -T 'commit_id' 2>/dev/null | head -1 || true)
+fi
+if [ -z "$head_sha" ]; then
+    head_sha=$(git -C "$workdir" rev-parse HEAD 2>/dev/null || true)
+fi
 if ! printf '%s' "$head_sha" | grep -Eq '^[0-9a-fA-F]{7,40}$'; then
     exit 0
 fi
