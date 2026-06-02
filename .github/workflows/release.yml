@@ -41,22 +41,34 @@ jobs:
           fi
 
           # 既存 tag と比較 (semver gt 検証で二重リリース防止)
+          # 旧 `vcs:latest-tag()` 構文は bump-semver v0.29.0 (DR-0020) で削除済。
+          # `vcs tag latest` で LATEST 取得 → `compare gt` の 2 段構えに移行。
+          # --include-prerelease は旧構文との byte-identical 互換のため明示。
+          # `vcs tag latest` の exit code:
+          #   0 = LATEST 取得成功
+          #   3 = SemVer-parseable tag が 1 件もない → first release として通過
+          #   その他 = エラー
           set +e
-          bump-semver compare gt "$VERSION" 'vcs:latest-tag()' --vcs git
-          CMP_EXIT=$?
+          LATEST=$(bump-semver vcs tag latest --include-prerelease --vcs git 2>/dev/null)
+          LATEST_EXIT=$?
           set -e
-          case "$CMP_EXIT" in
-            0) ;;  # VERSION > latest-tag, 続行
-            1)
-              echo "::notice::v${VERSION} is not greater than latest tag; skipping."
-              exit 0 ;;
-            2)
-              echo "::notice::No prior tags; assuming first release."
-              ;;
-            *)
-              echo "::error::Unexpected exit code from bump-semver compare: ${CMP_EXIT}"
-              exit 1 ;;
-          esac
+          if [ "$LATEST_EXIT" -ne 0 ]; then
+            echo "::notice::vcs tag latest exited ${LATEST_EXIT} (no SemVer tags yet); assuming first release."
+          else
+            set +e
+            bump-semver compare gt "$VERSION" "$LATEST"
+            CMP_EXIT=$?
+            set -e
+            case "$CMP_EXIT" in
+              0) ;;  # VERSION > LATEST, 続行
+              1)
+                echo "::notice::v${VERSION} is not greater than latest tag ${LATEST}; skipping."
+                exit 0 ;;
+              *)
+                echo "::error::Unexpected exit code from bump-semver compare: ${CMP_EXIT}"
+                exit 1 ;;
+            esac
+          fi
 
           # gh release で既存確認 (compare で通っても念のため)
           if gh release view "v${VERSION}" --repo "$REPO" >/dev/null 2>&1; then
