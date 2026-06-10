@@ -51,12 +51,12 @@ bump-version level="patch": ensure-clean
 # push (バージョン bump 済みを前提、全 gate 通過後に push)
 push: ensure-clean ci check-outdated-translations check-versions check-version-bumped
     bump-semver vcs push --branch main --jj-bookmark-auto-advance
-    @just _local-plugin-reload
+    @just _post-push-hint
 
 # push (ドキュメント更新等のみで bump 不要な場合)
 push-without-bump: ensure-clean ci check-outdated-translations check-versions
     bump-semver vcs push --branch main --jj-bookmark-auto-advance
-    @just _local-plugin-reload
+    @just _post-push-hint
 
 # ---------- internal recipes (push の依存) ----------
 
@@ -79,15 +79,27 @@ check-versions:
 check-outdated-translations: ensure-clean
     bump-semver vcs outdated 'glob:**/*-ja.md' '$1/$2.md'
 
-# push 成功直後の local 反映: 現セッションの marketplace + plugin を update し
-# ユーザに /reload-plugins 依頼まで出す。push して終わりだと local Claude は
-# 古い plugin で動き続けるため、push task に embed して仕組みで強制する。
+# push 直後の AI 向け hint。post_tool_use hook が「watch-workflow を起動せよ」
+# という generic 指示を別途出すので、その起動時に self-dogfood として
+# `--on-success Release "just _on-release-success"` を必ず付けるよう促す。
+# Release workflow が成功すれば、その時点で cache update + reload-plugins
+# 依頼が走る (= CI 検証前 version の local 反映を防ぐ)。
 [private]
-_local-plugin-reload:
+_post-push-hint:
+    @echo ""
+    @echo "[hint] watch-workflow を起動する際、self-dogfood として以下の引数を付けること:"
+    @echo "       --on-success Release 'just _on-release-success'"
+    @echo "       Release workflow success で plugin cache update + /reload-plugins 依頼が流れる。"
+
+# Release workflow success 後に AI が実行する reload route (= --on-success
+# Release から呼ばれる)。CI/Release で検証済 version だけ cache に反映して
+# ユーザに /reload-plugins を依頼する。旧 _local-plugin-reload (= push 末尾即時
+# update) は CI 検証前 version を local 反映する穴があったため、本 task で代替。
+_on-release-success:
     claude plugin marketplace update gh-monitor
     claude plugin update gh-monitor@gh-monitor
     @echo ""
-    @echo "[hint] /reload-plugins to apply in this session without restart"
+    @echo "[hint] /reload-plugins to apply the verified release in this session without restart"
 
 # bump-trigger-paths に変更があるなら version も bump されているか検証
 # bump-semver vcs diff の exit code:

@@ -38,4 +38,18 @@ just push             # バージョン一致 + validate + lint + push
 just push-without-bump
 ```
 
+### self-dogfood: Release success → plugin reload
+
+このリポ自身を **`watch-workflow` の `--on-success` で dogfood** する運用にしている。
+
+- `just push` 自体は plugin cache を update しない (= CI/Release 検証前の version を local に反映しないため、過去の `_local-plugin-reload` ルートは撤去済)
+- post_tool_use hook が出す Monitor 起動指示に対し、**このリポでは追加で `--on-success Release 'just _on-release-success'` を付ける** こと:
+  ```bash
+  bash <plugin>/scripts/watch-workflow.sh --sha <SHA> \
+    --on-success Release 'just _on-release-success' \
+    kawaz/claude-gh-monitor
+  ```
+- `just _on-release-success` は `claude plugin marketplace update gh-monitor` + `claude plugin update gh-monitor@gh-monitor` + `/reload-plugins` 依頼 echo を実行
+- 流れ: push → CI/Release workflow → Release success → 通知 stream に `[ACTION:Release] just _on-release-success` が emit → AI が task 実行 → ユーザに `/reload-plugins` 依頼
+
 詳細設計は [docs/DESIGN.md](docs/DESIGN.md)、設計判断は [docs/decisions/INDEX.md](docs/decisions/INDEX.md) を参照。

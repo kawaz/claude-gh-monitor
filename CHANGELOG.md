@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-06-10
+
+### Changed
+
+- `justfile`: `push` / `push-without-bump` 末尾の `_local-plugin-reload` 即時実行を撤去。**push 直後 (= CI/Release workflow 未実行) に local plugin cache を新 version で上書きしてしまう穴**があり、検証前 version を session に load させるリスクがあった。同 task は `_on-release-success` に rename
+- `justfile`: 新 `_post-push-hint` task を `push` / `push-without-bump` の末尾で呼び、AI に「`watch-workflow` を起動する際は `--on-success Release 'just _on-release-success'` を必ず付けよ」と echo で促す。post_tool_use hook の generic な「watch-workflow を起動せよ」指示と組合せて、self-repo では `--on-success` 付き起動になるよう誘導 (= hook 改修なしで self-dogfood を実現)
+- `CLAUDE.md`: self-dogfood セクションを追加。0.5.0 で追加した action hook 機能を自リポで dogfood するルート (= Release success 後の通知 stream に `[ACTION:Release] just _on-release-success` が embed → AI が task 実行 → CI 検証済 version だけ cache 反映 → ユーザに `/reload-plugins` 依頼)
+
 ## [0.5.0] - 2026-06-10
 
 ### Added
