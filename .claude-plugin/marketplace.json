@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Monitor GitHub asynchronous events (PR state changes, GitHub Actions workflow runs) via Claude Code hooks + Monitor tool.",
-    "version": "0.5.0"
+    "version": "0.5.1"
   },
   "plugins": [
     {
