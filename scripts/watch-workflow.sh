@@ -28,11 +28,17 @@ max_interval_input="10m"
 no_match_input="10m"
 repo=""
 
+# action hooks: --on-success <key> <msg> / --on-failure <key> <msg> (repeatable, append)
+on_success_keys=()
+on_success_msgs=()
+on_failure_keys=()
+on_failure_msgs=()
+
 usage() {
     cat <<'EOF' >&2
 Usage:
-  watch-workflow.sh --sha <SHA> [--grace=60s] [--timeout=24h] <OWNER/REPO>
-  watch-workflow.sh --passive [--max-interval=10m] [--timeout=24h] <OWNER/REPO>
+  watch-workflow.sh --sha <SHA> [--grace=60s] [--timeout=24h] [action-hooks] <OWNER/REPO>
+  watch-workflow.sh --passive [--max-interval=10m] [--timeout=24h] [action-hooks] <OWNER/REPO>
 
 Mode (one required):
   --sha <SHA>              SHA-pinned: watch checks for the given commit, exit when all terminal + grace.
@@ -40,6 +46,10 @@ Mode (one required):
 
 Common:
   --timeout=<duration>     Safety timeout (default 24h).
+  --on-success <key> <msg> When a run with key matches transitions to success, emit `[ACTION:<key>] <msg>`. Repeatable.
+  --on-failure <key> <msg> Same for failure conclusions. Repeatable.
+                           <key> matches against: YAML `name:` (e.g. `Release`), basename of workflow
+                           file (e.g. `release.yml`), or basename without `.yml`/`.yaml` (e.g. `release`).
 
 SHA-pinned only:
   --grace=<duration>       Quiet period after all-terminal before exit (default 60s).
@@ -76,6 +86,14 @@ while [ $# -gt 0 ]; do
         --max-interval=*) max_interval_input=${1#--max-interval=}; shift ;;
         --no-match-timeout)   _need_value "$1" "${2:-}"; no_match_input=$2; shift 2 ;;
         --no-match-timeout=*) no_match_input=${1#--no-match-timeout=}; shift ;;
+        --on-success)
+            _need_value "$1" "${2:-}"
+            if [ $# -lt 3 ]; then echo "[ERROR] --on-success requires <key> <msg>" >&2; exit 2; fi
+            on_success_keys+=("$2"); on_success_msgs+=("$3"); shift 3 ;;
+        --on-failure)
+            _need_value "$1" "${2:-}"
+            if [ $# -lt 3 ]; then echo "[ERROR] --on-failure requires <key> <msg>" >&2; exit 2; fi
+            on_failure_keys+=("$2"); on_failure_msgs+=("$3"); shift 3 ;;
         --exit-on-final)  shift ;;
         -h|--help)        usage; exit 0 ;;
         --)               shift; break ;;
@@ -217,11 +235,49 @@ quote_value() {
 }
 
 emit_run() {
+    # args: 1=name 2=id 3=status 4=sha 5=branch 6=actor 7=event 8=path
     local sha7_local
     sha7_local=$(printf '%s' "$4" | cut -c1-7)
     printf '[run:change] workflow:%s id:%s status:%s commit:%s branch:%s user:%s event:%s\n' \
         "$(quote_value "$1")" "$2" "$3" "$sha7_local" \
         "$(quote_value "$5")" "$(quote_value "$6")" "$7"
+    emit_actions "$1" "${8:-}" "$3"
+}
+
+# action hooks: emit `[ACTION:<key>] <msg>` lines after a run reaches success/failure
+# matching a registered key. key matches against three axes:
+#   - YAML name (.name), e.g. "Release"
+#   - basename(.path), e.g. "release.yml"
+#   - basename(.path) with .yml/.yaml stripped, e.g. "release"
+emit_actions() {
+    local rname=$1 rpath=$2 rstatus=$3
+    local rbase rstem n i k m
+    rbase=${rpath##*/}
+    rstem=${rbase%.yml}
+    rstem=${rstem%.yaml}
+
+    case "$rstatus" in
+        success)
+            n=${#on_success_keys[@]}
+            for ((i = 0; i < n; i++)); do
+                k=${on_success_keys[i]}
+                m=${on_success_msgs[i]}
+                if [ "$k" = "$rname" ] || { [ -n "$rbase" ] && [ "$k" = "$rbase" ]; } || { [ -n "$rstem" ] && [ "$k" = "$rstem" ]; }; then
+                    printf '[ACTION:%s] %s\n' "$k" "$m"
+                fi
+            done
+            ;;
+        failure)
+            n=${#on_failure_keys[@]}
+            for ((i = 0; i < n; i++)); do
+                k=${on_failure_keys[i]}
+                m=${on_failure_msgs[i]}
+                if [ "$k" = "$rname" ] || { [ -n "$rbase" ] && [ "$k" = "$rbase" ]; } || { [ -n "$rstem" ] && [ "$k" = "$rstem" ]; }; then
+                    printf '[ACTION:%s] %s\n' "$k" "$m"
+                fi
+            done
+            ;;
+    esac
 }
 
 #-----------------------------------------------------------------------------
@@ -256,7 +312,7 @@ while true; do
     # この iter の集計
     transitions_this_iter=0
 
-    while IFS=$'\t' read -r rid rstate rname rsha rbranch ractor revent rupd_epoch; do
+    while IFS=$'\t' read -r rid rstate rname rsha rbranch ractor revent rupd_epoch rpath; do
         [ -z "$rid" ] && continue
 
         # SHA-pinned: filter + last seen state を matching_state に記録
@@ -275,12 +331,12 @@ while true; do
                 # SHA-pinned: baseline で全 matching を emit (= 状態把握)
                 # Passive: cutoff より新しい完了 run のみ emit (fast CI 救済、DR-0003)
                 if [ -n "$sha" ]; then
-                    emit_run "$rname" "$rid" "$rstate" "$rsha" "$rbranch" "$ractor" "$revent"
+                    emit_run "$rname" "$rid" "$rstate" "$rsha" "$rbranch" "$ractor" "$revent" "$rpath"
                     transitions_this_iter=$((transitions_this_iter + 1))
                 elif [ "$rupd_epoch" -ge "$cutoff_epoch" ] \
                     && [ "$rstate" != "queued" ] \
                     && [ "$rstate" != "in_progress" ]; then
-                    emit_run "$rname" "$rid" "$rstate" "$rsha" "$rbranch" "$ractor" "$revent"
+                    emit_run "$rname" "$rid" "$rstate" "$rsha" "$rbranch" "$ractor" "$revent" "$rpath"
                     transitions_this_iter=$((transitions_this_iter + 1))
                 fi
             fi
@@ -288,11 +344,11 @@ while true; do
             prev=${known_state[$rid]:-}
             if [ -z "$prev" ]; then
                 known_state[$rid]=$rstate
-                emit_run "$rname" "$rid" "$rstate" "$rsha" "$rbranch" "$ractor" "$revent"
+                emit_run "$rname" "$rid" "$rstate" "$rsha" "$rbranch" "$ractor" "$revent" "$rpath"
                 transitions_this_iter=$((transitions_this_iter + 1))
             elif [ "$prev" != "$rstate" ]; then
                 known_state[$rid]=$rstate
-                emit_run "$rname" "$rid" "$rstate" "$rsha" "$rbranch" "$ractor" "$revent"
+                emit_run "$rname" "$rid" "$rstate" "$rsha" "$rbranch" "$ractor" "$revent" "$rpath"
                 transitions_this_iter=$((transitions_this_iter + 1))
             fi
         fi
@@ -306,7 +362,8 @@ while true; do
             (.head_branch // ""),
             (.actor.login // .triggering_actor.login // ""),
             (.event // ""),
-            ((.updated_at // .created_at) | fromdateiso8601)
+            ((.updated_at // .created_at) | fromdateiso8601),
+            (.path // "")
         ] | @tsv
     ' 2>/dev/null)
 

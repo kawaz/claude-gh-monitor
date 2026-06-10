@@ -95,6 +95,45 @@ git -C "$CLAUDE_PROJECT_DIR" config --get remote.origin.url
 
 remote が GitHub 以外、または取れない場合は起動せず「この workspace の origin remote は GitHub の repo を指していません」と報告する。
 
+## action hook (`--on-success` / `--on-failure`)
+
+特定 workflow の状態遷移時に `[ACTION:<key>] <msg>` を追加 emit し、AI に明示的な後続操作を指示する経路。`@echo` hint より catch 率が高い (= 通知に直接埋まる)。両 mode 共通で動作。
+
+### 利用例
+
+```bash
+# bump-semver の Release workflow が成功したら brew upgrade を打たせる
+watch-workflow.sh --sha <SHA> \
+  --on-success Release "brew upgrade kawaz/tap/bump-semver" \
+  kawaz/bump-semver
+
+# 失敗時に音声通知 + 成功時に複数 hook
+watch-workflow.sh --sha <SHA> \
+  --on-success Release "brew upgrade kawaz/tap/myproj" \
+  --on-success Deploy  "echo prod deployed" \
+  --on-failure Release "say 'リリース失敗確認お願いします'" \
+  kawaz/myproj
+```
+
+### emit 形式
+
+```
+[run:change] workflow:Release id:XXX status:success commit:abc branch:main user:kawaz event:push
+[ACTION:Release] brew upgrade kawaz/tap/bump-semver
+```
+
+### key matching
+
+3 軸で完全一致判定 (= user の mental model に合わせる):
+
+| key 形式 | 例 | 比較対象 |
+|---|---|---|
+| YAML name | `Release` | run の `.name` |
+| basename | `release.yml` | `basename(.path)` |
+| basename (stem) | `release` | `basename(.path)` から `.yml`/`.yaml` 剥がし |
+
+複数 `--on-success` / `--on-failure` を渡せる (= repeatable + append)。同じ run に複数 key が当たれば、全部 emit される。
+
 ## 通知行の読み方
 
 emit は 2 系統:
@@ -108,6 +147,8 @@ watch-workflow は run の状態変化のみ:
 ```
 [run:change] workflow:<name> id:<id> status:<status> commit:<sha7> branch:<branch> user:<actor> event:<event>
 ```
+
+`--on-success` / `--on-failure` を渡してあると、success / failure 遷移後に `[ACTION:<key>] <msg>` 行が追加 emit される (上記 action hook セクション参照)。
 
 status の語彙 (gh 準拠、フラット化):
 

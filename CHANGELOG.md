@@ -2,7 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.4.4] - 2026-06-02
+## [0.5.0] - 2026-06-10
+
+### Added
+
+- `scripts/watch-workflow.sh`: action hook (`--on-success <key> <msg>` / `--on-failure <key> <msg>`、repeatable) を追加 ([docs/issue/2026-06-10-watch-workflow-on-success-action-hook.md](docs/issue/2026-06-10-watch-workflow-on-success-action-hook.md))。マッチする run が `success` / `failure` に遷移すると `[run:change]` 直後に `[ACTION:<key>] <msg>` を追加 emit する。`<key>` は YAML `name:` / workflow file basename (`release.yml`) / basename stem (`release`) の 3 軸で完全一致判定。両 mode (SHA-pinned / Passive) 共通で動作。bump-semver の release 運用で「`just push` → workflow 成功 → `brew upgrade` を AI に必ず実行させる」用途を始め、`@echo` hint より AI 視野に強制的に入る経路として機能する (AI は通知 stream を必ず読むため、hint 流し見問題を解消)
+- `tests/run-tests.sh`: action hook の smoke test 4 件追加 (success emit / failure emit / matching 3 軸 / 値抜け検出)
 
 ### Changed
 

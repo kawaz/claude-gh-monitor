@@ -396,6 +396,117 @@ test_watch_workflow_flag_value_missing() {
 }
 
 # ============================================================
+# Test 10/11/12: --on-success / --on-failure action hooks
+# ============================================================
+fixture_runs_release_in_progress() {
+    local nowiso
+    nowiso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    cat <<JSON
+{"workflow_runs":[
+  {"id":4001,"status":"in_progress","conclusion":null,"name":"Release","path":".github/workflows/release.yml","head_sha":"deadbeefcafebabedeadbeefcafebabedeadbeef","head_branch":"main","actor":{"login":"kawaz"},"event":"push","updated_at":"$nowiso"}
+]}
+JSON
+}
+
+fixture_runs_release_success() {
+    local nowiso
+    nowiso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    cat <<JSON
+{"workflow_runs":[
+  {"id":4001,"status":"completed","conclusion":"success","name":"Release","path":".github/workflows/release.yml","head_sha":"deadbeefcafebabedeadbeefcafebabedeadbeef","head_branch":"main","actor":{"login":"kawaz"},"event":"push","updated_at":"$nowiso"}
+]}
+JSON
+}
+
+fixture_runs_release_failure() {
+    local nowiso
+    nowiso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    cat <<JSON
+{"workflow_runs":[
+  {"id":4001,"status":"completed","conclusion":"failure","name":"Release","path":".github/workflows/release.yml","head_sha":"deadbeefcafebabedeadbeefcafebabedeadbeef","head_branch":"main","actor":{"login":"kawaz"},"event":"push","updated_at":"$nowiso"}
+]}
+JSON
+}
+
+test_watch_workflow_on_success_emits_action() {
+    local stub_dir; stub_dir=$(mktemp -d)
+    trap 'rm -rf "$stub_dir"' RETURN
+    write_stub "$stub_dir/bin"
+    fixture_runs_release_in_progress > "$stub_dir/runs-1.json"
+    fixture_runs_release_success     > "$stub_dir/runs-2.json"
+    fixture_runs_release_success     > "$stub_dir/runs-3.json"
+    fixture_runs_release_success     > "$stub_dir/runs-4.json"
+
+    local out
+    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" WATCH_WORKFLOW_INTERVAL=1 \
+        timeout 10 bash "$repo_root/scripts/watch-workflow.sh" --sha deadbeefcafebabe \
+            --on-success Release "brew upgrade kawaz/tap/foo" \
+            --grace=2s --timeout=10s kawaz/test 2>&1 || true)
+
+    assert_output "watch-workflow: --on-success emits [ACTION:<key>] on success transition" "$out" \
+        "$(printf 'status:success\n[ACTION:Release] brew upgrade kawaz/tap/foo\n')" \
+        ""
+}
+
+test_watch_workflow_on_failure_emits_action() {
+    local stub_dir; stub_dir=$(mktemp -d)
+    trap 'rm -rf "$stub_dir"' RETURN
+    write_stub "$stub_dir/bin"
+    fixture_runs_release_in_progress > "$stub_dir/runs-1.json"
+    fixture_runs_release_failure     > "$stub_dir/runs-2.json"
+    fixture_runs_release_failure     > "$stub_dir/runs-3.json"
+    fixture_runs_release_failure     > "$stub_dir/runs-4.json"
+
+    local out
+    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" WATCH_WORKFLOW_INTERVAL=1 \
+        timeout 10 bash "$repo_root/scripts/watch-workflow.sh" --sha deadbeefcafebabe \
+            --on-failure Release "say release failed" \
+            --on-success Release "echo should-not-fire" \
+            --grace=2s --timeout=10s kawaz/test 2>&1 || true)
+
+    assert_output "watch-workflow: --on-failure emits [ACTION:<key>] on failure transition" "$out" \
+        "$(printf 'status:failure\n[ACTION:Release] say release failed\n')" \
+        "$(printf 'echo should-not-fire\n')"
+}
+
+test_watch_workflow_on_success_matching_axes() {
+    local stub_dir; stub_dir=$(mktemp -d)
+    trap 'rm -rf "$stub_dir"' RETURN
+    write_stub "$stub_dir/bin"
+    fixture_runs_release_in_progress > "$stub_dir/runs-1.json"
+    fixture_runs_release_success     > "$stub_dir/runs-2.json"
+    fixture_runs_release_success     > "$stub_dir/runs-3.json"
+    fixture_runs_release_success     > "$stub_dir/runs-4.json"
+
+    local out
+    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" WATCH_WORKFLOW_INTERVAL=1 \
+        timeout 10 bash "$repo_root/scripts/watch-workflow.sh" --sha deadbeefcafebabe \
+            --on-success Release      "msg-name" \
+            --on-success release.yml  "msg-basename" \
+            --on-success release      "msg-stem" \
+            --on-success NoMatch      "msg-skip" \
+            --grace=2s --timeout=10s kawaz/test 2>&1 || true)
+
+    assert_output "watch-workflow: --on-success matches name / basename / stem (no NoMatch leakage)" "$out" \
+        "$(printf '[ACTION:Release] msg-name\n[ACTION:release.yml] msg-basename\n[ACTION:release] msg-stem\n')" \
+        "$(printf '[ACTION:NoMatch] msg-skip\n')"
+}
+
+test_watch_workflow_on_success_missing_value() {
+    local stub_dir; stub_dir=$(mktemp -d)
+    trap 'rm -rf "$stub_dir"' RETURN
+    write_stub "$stub_dir/bin"
+
+    local out
+    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" \
+        bash "$repo_root/scripts/watch-workflow.sh" --on-success 2>&1 || true)
+
+    assert_output "watch-workflow: --on-success without value exits 2" "$out" \
+        "$(printf '%s' '--on-success requires a value')" \
+        ""
+}
+
+# ============================================================
 # 実行
 # ============================================================
 
@@ -410,6 +521,10 @@ test_watch_workflow_sha_pinned_no_match_timeout
 test_watch_workflow_sha_pinned_no_exit_when_known_non_terminal_disappears
 test_watch_workflow_sha_pinned_state_transition_then_exit
 test_watch_workflow_flag_value_missing
+test_watch_workflow_on_success_emits_action
+test_watch_workflow_on_failure_emits_action
+test_watch_workflow_on_success_matching_axes
+test_watch_workflow_on_success_missing_value
 
 echo ""
 echo "Results: $pass passed, $fail failed"

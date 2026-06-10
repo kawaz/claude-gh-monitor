@@ -87,6 +87,19 @@ emit 例:
 [run:change] workflow:ci.yml id:12345678 status:failure commit:abc1234 branch:main user:kawaz event:push
 ```
 
+#### action hook (`--on-success` / `--on-failure`)
+
+両 mode で repeatable な `--on-success <key> <msg>` / `--on-failure <key> <msg>` を受け付けます。マッチする run が `success` / `failure` に遷移すると、`[run:change]` 直後に追加で `[ACTION:<key>] <msg>` 行が emit されます。`@echo` hint より AI の catch 率が高い経路 (= AI が必ず読む通知ストリームに action が直接埋まる)。
+
+```bash
+watch-workflow.sh --sha <SHA> \
+  --on-success Release "brew upgrade kawaz/tap/bump-semver" \
+  --on-failure Release "say 'リリース失敗確認お願いします'" \
+  kawaz/bump-semver
+```
+
+`<key>` は 3 軸で完全一致判定: YAML `name:` (例 `Release`) / workflow file basename (例 `release.yml`) / basename から `.yml`/`.yaml` 剥がし (例 `release`)。
+
 ### 自セッション起因イベントの suppress
 
 `watch-pr` のみ、デフォルトで **同じ gh authenticated user (= `gh api user` の `.login`) が起こした comment / review / merge の通知を抑制** します ([DR-0004](docs/decisions/DR-0004-suppress-self-originated-events.md))。Claude 自身が `gh pr comment` 等で発火したイベントが Monitor 経由でエコーバックされて余計な思考ターンを誘発する問題への対策です。

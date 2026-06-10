@@ -87,6 +87,19 @@ Example emit:
 [run:change] workflow:ci.yml id:12345678 status:failure commit:abc1234 branch:main user:kawaz event:push
 ```
 
+#### Action hooks (`--on-success` / `--on-failure`)
+
+Both modes accept repeatable `--on-success <key> <msg>` and `--on-failure <key> <msg>` flags. When a matching run transitions to `success` / `failure`, an additional `[ACTION:<key>] <msg>` line is emitted right after `[run:change]`. This is a higher-catch-rate replacement for `@echo` hints that AI agents tend to skim past — the action item lands directly inside the notification stream Claude always reads.
+
+```bash
+watch-workflow.sh --sha <SHA> \
+  --on-success Release "brew upgrade kawaz/tap/bump-semver" \
+  --on-failure Release "say 'release failed'" \
+  kawaz/bump-semver
+```
+
+`<key>` matches against three axes: the YAML `name:` field (e.g. `Release`), the workflow file basename (e.g. `release.yml`), or the basename without `.yml`/`.yaml` (e.g. `release`).
+
 ### Suppressing self-originated events
 
 `watch-pr` (only) suppresses notifications for **comments / reviews / merges whose author matches the current `gh api user --jq .login`** by default ([DR-0004](docs/decisions/DR-0004-suppress-self-originated-events.md)). This prevents Claude's own actions (e.g. `gh pr comment`) from being echoed back through the Monitor and burning an extra reasoning turn.
