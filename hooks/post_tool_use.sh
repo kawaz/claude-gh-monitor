@@ -75,6 +75,7 @@ _workdir_override=""
 _last_cd=$(printf '%s' "$command" | grep -oE '(^|[;&|(])[[:space:]]*cd[[:space:]]+[^;&|()][^;&|()]*' | tail -1 | sed -E 's/^[[:space:]]*([;&|(])[[:space:]]*//' | sed -E 's/^cd[[:space:]]+//' | sed 's/[[:space:]]*$//')
 if [ -n "$_last_cd" ]; then
     # チルダ展開のみ安全に処理 (シェル変数 $ を含む場合はスキップ)
+    # shellcheck disable=SC2088  # command 文字列中の未展開リテラル '~' を意図的にマッチさせる case パターン
     case "$_last_cd" in
         *'$'*) ;;   # シェル変数あり → skip
         '~'|'~/'*) _last_cd_expanded="${HOME}${_last_cd#\~}" ;;
