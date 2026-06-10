@@ -133,8 +133,8 @@ just lint                # shellcheck (scripts/ hooks/) + actionlint (.github/wo
 just test                # tests/run-tests.sh (gh-stubbed smoke tests, no bats required)
 just version             # show current version
 just bump-version        # patch bump (pass `minor` / `major` for level)
-just push                # run all checks + version bump detection + push
-just push-without-bump   # for docs-only changes where no bump is required
+just push                # run all checks + version-bump detection + push
+                         # (docs-only / workflow-only changes auto-skip the bump gate)
 ```
 
 ## Troubleshooting
