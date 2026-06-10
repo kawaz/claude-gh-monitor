@@ -21,6 +21,7 @@
 #   - tool_input.command が push regex にマッチしない
 #   - tool_response が失敗 (is_error == true / interrupted == true)
 #   - CLAUDE_PROJECT_DIR の origin remote から user/repo を解決できない
+#   - push 元リポのローカル checkout に .github/workflows/*.yml|*.yaml が 1 つも無い
 
 set -u
 
@@ -57,8 +58,37 @@ if printf '%s' "$input" | jq -e '.tool_response.is_error == true or .tool_respon
     exit 0
 fi
 
-# CLAUDE_PROJECT_DIR の origin remote から user/repo を解決
-workdir=${CLAUDE_PROJECT_DIR:-$(printf '%s' "$input" | jq -r '.cwd // empty')}
+# push が実行された cwd を推測する。
+#
+# 問題: CLAUDE_PROJECT_DIR はセッション起点のプロジェクトディレクトリを指すが、
+#   `cd /other/repo && just push` のような越境 push では push 対象が別リポになる。
+#   CLAUDE_PROJECT_DIR 基準で repo/SHA を解決すると、別リポへの push を誤認する。
+#
+# 軽量対策: command に "cd <path>" が含まれる場合、最後の cd パスを解決基準に使う。
+#   - "cd X && ... push" の形を想定、単純な 1 段 parse のみ
+#   - 展開不能 (シェル変数 $HOME 等を含む) / 存在しないパス → フォールバック
+#   - 多段 cd や複雑な構造は安全側 (CLAUDE_PROJECT_DIR) にフォールバック
+#
+# 安全原則: 解決に自信が持てないケースは nudge 側に倒す (過剰抑制で本物の CI watch を
+#   失う方が損)。不正確でも「より正確に近い」方向に寄せるのみ。
+_workdir_override=""
+_last_cd=$(printf '%s' "$command" | grep -oE '(^|[;&|(])[[:space:]]*cd[[:space:]]+[^;&|()][^;&|()]*' | tail -1 | sed -E 's/^[[:space:]]*([;&|(])[[:space:]]*//' | sed -E 's/^cd[[:space:]]+//' | sed 's/[[:space:]]*$//')
+if [ -n "$_last_cd" ]; then
+    # チルダ展開のみ安全に処理 (シェル変数 $ を含む場合はスキップ)
+    case "$_last_cd" in
+        *'$'*) ;;   # シェル変数あり → skip
+        '~'|'~/'*) _last_cd_expanded="${HOME}${_last_cd#\~}" ;;
+        *) _last_cd_expanded="$_last_cd" ;;
+    esac
+    if [ -n "${_last_cd_expanded:-}" ] && [ -d "$_last_cd_expanded" ]; then
+        _wt=$(git -C "$_last_cd_expanded" rev-parse --show-toplevel 2>/dev/null || true)
+        [ -n "$_wt" ] && _workdir_override="$_wt"
+    fi
+fi
+unset _last_cd _last_cd_expanded _wt
+
+workdir=${_workdir_override:-${CLAUDE_PROJECT_DIR:-$(printf '%s' "$input" | jq -r '.cwd // empty')}}
+unset _workdir_override
 [ -n "$workdir" ] || workdir=$(pwd)
 
 url=$(git -C "$workdir" config --get remote.origin.url 2>/dev/null || true)
@@ -74,6 +104,18 @@ if [[ "$url" =~ ^(https?://|ssh://(git@)?|git@)github\.com[:/]([A-Za-z0-9._-]+/[
     repo=${BASH_REMATCH[3]}
 fi
 [ -n "$repo" ] || exit 0
+
+# ローカル checkout に GitHub Actions workflow が 1 つも無ければ nudge 不要 → 黙って終了
+# - 判定はローカルファイルのみ (hook は同期実行なのでネットワークコール禁止)
+# - worktree 運用前提のため git -C で toplevel を解決してからチェック
+_repo_toplevel=$(git -C "$workdir" rev-parse --show-toplevel 2>/dev/null || true)
+if [ -n "$_repo_toplevel" ]; then
+    _wf_dir="$_repo_toplevel/.github/workflows"
+    if [ ! -d "$_wf_dir" ] || ! find "$_wf_dir" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null | grep -q .; then
+        exit 0
+    fi
+fi
+unset _repo_toplevel _wf_dir
 
 # push 直後の head SHA を解決 (SHA-pinned 起動用)
 # - jj 管理リポでは `@` (working-copy) が空 commit のことが多く、`git rev-parse HEAD`

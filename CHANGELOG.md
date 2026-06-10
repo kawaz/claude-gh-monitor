@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `hooks/post_tool_use.sh`: push 元リポのローカル checkout に `.github/workflows/*.yml|*.yaml` が 1 つも無ければ nudge を出さず即 exit 0。workflow を持たないリポへの push で Monitor が空回りする無駄を排除。`git rev-parse --show-toplevel` で worktree 対応済み。ヘッダコメントの「起動指示を出さない条件」にも追記
+- `hooks/post_tool_use.sh`: `cd <path> && ... push` 形式の越境 push における repo 誤認を軽減。`command` から末尾の `cd` パスを 1 個 parse し、存在する git リポなら `CLAUDE_PROJECT_DIR` より優先して workdir を決定。チルダ展開のみ行い、シェル変数 `$...` を含む場合や解決不能なパスは安全側 (`CLAUDE_PROJECT_DIR`) にフォールバック
+- `scripts/watch-workflow.sh`: watch ループ開始前に `gh api /repos/<owner/repo>/actions/workflows` で `total_count` を確認し、0 なら `[INFO] no workflows in <repo> — nothing to watch` を出して exit 0。API 失敗時は fail-open (= 判定スキップして watch 継続)
+- `tests/run-tests.sh`: 上記変更の smoke test 8 件を追加 (script 側: total_count=0 即 exit / total_count=1 継続 / API 失敗 fail-open の 3 件。hook 側: workflows ディレクトリ無し / 空ディレクトリ / cd push で cd 先使用 / cd push で cd 先 workflow 無し / yml あり の 5 件)。stub に `/repos/*/actions/workflows*` endpoint 分岐を追加
+
 ## [0.5.1] - 2026-06-10
 
 ### Changed

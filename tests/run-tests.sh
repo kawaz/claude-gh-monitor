@@ -40,6 +40,16 @@ if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
     exit 0
 fi
 
+if [ "$1" = "api" ] && [[ "$2" == /repos/*/actions/workflows* ]]; then
+    # workflow 一覧 (total_count): workflows-response.json があれば返す、なければデフォルト (workflows あり)
+    if [ -f "$GH_STUB_DIR/workflows-response.json" ]; then
+        cat "$GH_STUB_DIR/workflows-response.json"
+    else
+        printf '{"total_count":1,"workflows":[]}'
+    fi
+    exit 0
+fi
+
 if [ "$1" = "api" ] && [[ "$2" == /repos/* ]]; then
     counter_file="$GH_STUB_DIR/counter-runs"
     n=$(( $(cat "$counter_file" 2>/dev/null || echo 0) + 1 ))
@@ -507,6 +517,233 @@ test_watch_workflow_on_success_missing_value() {
 }
 
 # ============================================================
+# Test: watch-workflow.sh — workflow 不在リポは即 exit 0
+# ============================================================
+
+# total_count=0 → "[INFO] no workflows in ..." を emit して exit 0
+test_watch_workflow_no_workflows_exits_immediately() {
+    local stub_dir; stub_dir=$(mktemp -d)
+    trap 'rm -rf "$stub_dir"' RETURN
+    write_stub "$stub_dir/bin"
+    printf '{"total_count":0,"workflows":[]}' > "$stub_dir/workflows-response.json"
+
+    local out
+    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" WATCH_WORKFLOW_INTERVAL=1 \
+        timeout 5 bash "$repo_root/scripts/watch-workflow.sh" --sha deadbeefcafebabe kawaz/no-ci 2>&1 || true)
+
+    assert_output "watch-workflow: total_count=0 → no workflows message + exit without watch" "$out" \
+        "$(printf 'no workflows in kawaz/no-ci')" \
+        "$(printf 'no matching run\n[WARN]\n')"
+}
+
+# total_count=1 → 通常通り watch 継続 (= start ack が出る)
+test_watch_workflow_has_workflows_continues() {
+    local stub_dir; stub_dir=$(mktemp -d)
+    trap 'rm -rf "$stub_dir"' RETURN
+    write_stub "$stub_dir/bin"
+    # workflows-response.json を用意しない → stub デフォルト (total_count=1)
+    fixture_runs_no_match > "$stub_dir/runs-1.json"
+    fixture_runs_no_match > "$stub_dir/runs-2.json"
+
+    local out
+    # no-match-timeout=2s → matching 0 のまま 2s で exit
+    out=$(PATH="$stub_dir/bin:$PATH" GH_STUB_DIR="$stub_dir" WATCH_WORKFLOW_INTERVAL=1 \
+        timeout 8 bash "$repo_root/scripts/watch-workflow.sh" --sha deadbeefcafebabe \
+            --no-match-timeout=2s --timeout=20s kawaz/with-ci 2>&1 || true)
+
+    assert_output "watch-workflow: total_count=1 → watch starts (start ack present)" "$out" \
+        "$(printf '[INFO] watch-workflow start')" \
+        "$(printf 'no workflows in\n')"
+}
+
+# gh api 失敗 (exit 1) → fail-open: start ack が出て watch 継続
+test_watch_workflow_api_failure_fail_open() {
+    local stub_dir; stub_dir=$(mktemp -d)
+    trap 'rm -rf "$stub_dir"' RETURN
+    write_stub "$stub_dir/bin"
+    # workflows-response.json を作らず、かつ runs-*.json も置かない
+    # → workflows endpoint は stub デフォルト (total_count=1) なので fail 不能
+    # → 別 stub を上書きして workflows endpoint を exit 1 させる
+    mkdir -p "$stub_dir/bin2"
+    cat > "$stub_dir/bin2/gh" <<'FAILSTUB'
+#!/usr/bin/env bash
+if [ "$1" = "api" ] && [[ "$2" == /repos/*/actions/workflows* ]]; then
+    echo "[stub] simulated api failure" >&2
+    exit 1
+fi
+GH_STUB_DIR="${GH_STUB_DIR:?stub gh: GH_STUB_DIR not set}"
+if [ "$1" = "api" ] && [[ "$2" == /repos/* ]]; then
+    counter_file="$GH_STUB_DIR/counter-runs"
+    n=$(( $(cat "$counter_file" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" > "$counter_file"
+    f="$GH_STUB_DIR/runs-${n}.json"
+    if [ ! -f "$f" ]; then
+        last=$(find "$GH_STUB_DIR" -maxdepth 1 -name 'runs-*.json' 2>/dev/null | sort -V | tail -1)
+        [ -n "$last" ] && f="$last"
+    fi
+    cat "$f"
+    exit 0
+fi
+echo "[stub] unhandled: $*" >&2; exit 1
+FAILSTUB
+    chmod +x "$stub_dir/bin2/gh"
+    fixture_runs_no_match > "$stub_dir/runs-1.json"
+    fixture_runs_no_match > "$stub_dir/runs-2.json"
+
+    local out
+    # no-match-timeout=2s → api 失敗後も watch が継続して no-match で exit
+    out=$(PATH="$stub_dir/bin2:$PATH" GH_STUB_DIR="$stub_dir" WATCH_WORKFLOW_INTERVAL=1 \
+        timeout 8 bash "$repo_root/scripts/watch-workflow.sh" --sha deadbeefcafebabe \
+            --no-match-timeout=2s --timeout=20s kawaz/fail-api 2>&1 || true)
+
+    assert_output "watch-workflow: gh api workflows failure → fail-open, watch continues" "$out" \
+        "$(printf '[INFO] watch-workflow start')" \
+        "$(printf 'no workflows in\n')"
+}
+
+# ============================================================
+# Test: post_tool_use.sh — workflow 不在リポは nudge を出さない
+# ============================================================
+
+# helper: post_tool_use.sh に push JSON を stdin で流して出力を返す
+run_hook() {
+    local project_dir="$1"
+    local extra_env="${2:-}"
+    local push_cmd='git push origin main'
+    local json
+    json=$(jq -n \
+        --arg cmd "$push_cmd" \
+        --arg cwd "$project_dir" \
+        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{output:""},cwd:$cwd}')
+    env -i PATH="$PATH" HOME="$HOME" \
+        CLAUDE_PROJECT_DIR="$project_dir" \
+        $extra_env \
+        bash "$repo_root/hooks/post_tool_use.sh" <<< "$json" 2>&1 || true
+}
+
+# workflow ディレクトリ無しの場合 → additionalContext は出ない
+test_hook_no_workflow_dir_no_nudge() {
+    local tmp_repo; tmp_repo=$(mktemp -d)
+    trap 'rm -rf "$tmp_repo"' RETURN
+    git init -q "$tmp_repo"
+    git -C "$tmp_repo" remote add origin "https://github.com/kawaz/no-ci-repo.git"
+    # .github/workflows/ を作らない
+
+    local out
+    out=$(run_hook "$tmp_repo")
+
+    assert_output "hook: no .github/workflows dir → no nudge" "$out" \
+        "" \
+        "$(printf 'additionalContext\nwatch-workflow\n')"
+}
+
+# .github/workflows/ が空ディレクトリの場合 → nudge を出さない
+test_hook_empty_workflow_dir_no_nudge() {
+    local tmp_repo; tmp_repo=$(mktemp -d)
+    trap 'rm -rf "$tmp_repo"' RETURN
+    git init -q "$tmp_repo"
+    git -C "$tmp_repo" remote add origin "https://github.com/kawaz/no-ci-repo.git"
+    mkdir -p "$tmp_repo/.github/workflows"
+    # workflows/ は空 (yml ファイルなし)
+
+    local out
+    out=$(run_hook "$tmp_repo")
+
+    assert_output "hook: empty .github/workflows dir → no nudge" "$out" \
+        "" \
+        "$(printf 'additionalContext\nwatch-workflow\n')"
+}
+
+# cd <path> && push の形で越境 push した場合、cd 先リポを基準にする
+# - CLAUDE_PROJECT_DIR は workflow 無しリポ、cd 先は workflow ありリポ → nudge が出る
+test_hook_cd_push_uses_cd_repo() {
+    local tmp_project; tmp_project=$(mktemp -d)
+    local tmp_cd_repo; tmp_cd_repo=$(mktemp -d)
+    trap 'rm -rf "$tmp_project" "$tmp_cd_repo"' RETURN
+
+    # CLAUDE_PROJECT_DIR: workflow 無しリポ
+    git init -q "$tmp_project"
+    git -C "$tmp_project" remote add origin "https://github.com/kawaz/no-ci-repo.git"
+
+    # cd 先: workflow ありリポ
+    git init -q "$tmp_cd_repo"
+    git -C "$tmp_cd_repo" remote add origin "https://github.com/kawaz/has-ci-repo.git"
+    mkdir -p "$tmp_cd_repo/.github/workflows"
+    echo 'name: CI' > "$tmp_cd_repo/.github/workflows/ci.yml"
+    git -C "$tmp_cd_repo" config user.email "test@example.com"
+    git -C "$tmp_cd_repo" config user.name "test"
+    touch "$tmp_cd_repo/README.md"
+    git -C "$tmp_cd_repo" add README.md
+    git -C "$tmp_cd_repo" commit -q -m "init"
+
+    local cmd="cd $tmp_cd_repo && just push"
+    local json
+    json=$(jq -n --arg cmd "$cmd" --arg cwd "$tmp_project" \
+        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{output:""},cwd:$cwd}')
+    local out
+    out=$(env -i PATH="$PATH" HOME="$HOME" \
+        CLAUDE_PROJECT_DIR="$tmp_project" \
+        bash "$repo_root/hooks/post_tool_use.sh" <<< "$json" 2>&1 || true)
+
+    assert_output "hook: cd <path> && push → cd 先リポで repo/workflow 判定" "$out" \
+        "$(printf 'additionalContext\nwatch-workflow\n')" \
+        ""
+}
+
+# cd <path> && push で cd 先リポに workflow 無し → nudge なし
+test_hook_cd_push_no_workflow_in_cd_repo() {
+    local tmp_project; tmp_project=$(mktemp -d)
+    local tmp_cd_repo; tmp_cd_repo=$(mktemp -d)
+    trap 'rm -rf "$tmp_project" "$tmp_cd_repo"' RETURN
+
+    # CLAUDE_PROJECT_DIR: workflow ありリポ
+    git init -q "$tmp_project"
+    git -C "$tmp_project" remote add origin "https://github.com/kawaz/has-ci-repo.git"
+    mkdir -p "$tmp_project/.github/workflows"
+    echo 'name: CI' > "$tmp_project/.github/workflows/ci.yml"
+
+    # cd 先: workflow 無しリポ
+    git init -q "$tmp_cd_repo"
+    git -C "$tmp_cd_repo" remote add origin "https://github.com/kawaz/no-ci-repo.git"
+
+    local cmd="cd $tmp_cd_repo && git push"
+    local json
+    json=$(jq -n --arg cmd "$cmd" --arg cwd "$tmp_project" \
+        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{output:""},cwd:$cwd}')
+    local out
+    out=$(env -i PATH="$PATH" HOME="$HOME" \
+        CLAUDE_PROJECT_DIR="$tmp_project" \
+        bash "$repo_root/hooks/post_tool_use.sh" <<< "$json" 2>&1 || true)
+
+    assert_output "hook: cd <path> && push, cd 先に workflow 無し → nudge なし" "$out" \
+        "" \
+        "$(printf 'additionalContext\nwatch-workflow\n')"
+}
+
+# .yml ファイルがある場合 → additionalContext が出る (nudge あり)
+test_hook_has_workflow_yml_nudge() {
+    local tmp_repo; tmp_repo=$(mktemp -d)
+    trap 'rm -rf "$tmp_repo"' RETURN
+    git init -q "$tmp_repo"
+    git -C "$tmp_repo" remote add origin "https://github.com/kawaz/has-ci-repo.git"
+    mkdir -p "$tmp_repo/.github/workflows"
+    echo 'name: CI' > "$tmp_repo/.github/workflows/ci.yml"
+    # HEAD が必要 (sha 解決用)
+    git -C "$tmp_repo" config user.email "test@example.com"
+    git -C "$tmp_repo" config user.name "test"
+    touch "$tmp_repo/README.md"
+    git -C "$tmp_repo" add README.md
+    git -C "$tmp_repo" commit -q -m "init"
+
+    local out
+    out=$(run_hook "$tmp_repo")
+
+    assert_output "hook: .yml present → additionalContext with watch-workflow nudge" "$out" \
+        "$(printf 'additionalContext\nwatch-workflow\n')" \
+        ""
+}
+
+# ============================================================
 # 実行
 # ============================================================
 
@@ -525,6 +762,14 @@ test_watch_workflow_on_success_emits_action
 test_watch_workflow_on_failure_emits_action
 test_watch_workflow_on_success_matching_axes
 test_watch_workflow_on_success_missing_value
+test_watch_workflow_no_workflows_exits_immediately
+test_watch_workflow_has_workflows_continues
+test_watch_workflow_api_failure_fail_open
+test_hook_no_workflow_dir_no_nudge
+test_hook_empty_workflow_dir_no_nudge
+test_hook_cd_push_uses_cd_repo
+test_hook_cd_push_no_workflow_in_cd_repo
+test_hook_has_workflow_yml_nudge
 
 echo ""
 echo "Results: $pass passed, $fail failed"

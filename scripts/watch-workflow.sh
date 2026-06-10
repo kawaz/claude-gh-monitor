@@ -195,6 +195,22 @@ else
 fi
 
 #-----------------------------------------------------------------------------
+# workflow 存在チェック (ループ開始前)
+# - total_count == 0 なら watch 対象が無いので即 exit 0
+# - API 失敗時は fail-open (= 判定スキップして watch 継続。一時的なネットワーク/権限エラーで
+#   watch 自体を殺さない)
+#-----------------------------------------------------------------------------
+
+_wf_count=$(gh api "/repos/$repo/actions/workflows" 2>/dev/null | jq -r '.total_count // empty' 2>/dev/null || true)
+if printf '%s' "$_wf_count" | grep -Eq '^[0-9]+$'; then
+    if [ "$_wf_count" -eq 0 ]; then
+        echo "[INFO] no workflows in $repo — nothing to watch"
+        exit 0
+    fi
+fi
+unset _wf_count
+
+#-----------------------------------------------------------------------------
 # 状態
 #-----------------------------------------------------------------------------
 
