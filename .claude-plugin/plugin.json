@@ -1,7 +1,7 @@
 {
   "name": "gh-monitor",
   "description": "Monitor GitHub asynchronous events (PR state changes, GitHub Actions workflow runs) via Claude Code hooks + Monitor tool. Emits a single line per change so Claude Code can notify you without polling.",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "author": {
     "name": "kawaz"
   },
