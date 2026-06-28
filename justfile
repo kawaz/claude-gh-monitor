@@ -73,7 +73,7 @@ check-version-bumped:
 # version bump (default patch) + release commit (write + commit atomic)
 bump-version level="patch": ensure-clean
     bump-semver "$1" .claude-plugin/plugin.json .claude-plugin/marketplace.json --write --no-hint
-    bump-semver vcs commit -m "Release v$(bump-semver get .claude-plugin/plugin.json .claude-plugin/marketplace.json --no-hint)" .claude-plugin/plugin.json .claude-plugin/marketplace.json
+    bump-semver vcs commit --allow-nonexistent-path -m "Release v$(bump-semver get .claude-plugin/plugin.json .claude-plugin/marketplace.json --no-hint)" .claude-plugin/plugin.json .claude-plugin/marketplace.json
     @echo "Version: -> $(bump-semver get .claude-plugin/plugin.json .claude-plugin/marketplace.json --no-hint)"
 
 # push (docs/workflow のみの変更は check-version-bumped が自動 pass)
