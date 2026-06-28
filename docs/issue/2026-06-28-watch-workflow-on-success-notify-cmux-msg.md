@@ -151,3 +151,36 @@ push: ...
 - [ ] workflow success 時に cmux-msg notify --self 経由で AI セッションに通知が届く
 - [ ] 既存 `--on-success <key> <msg>` との後方互換が保たれる
 - [ ] SKILL.md の hint 例が新 API に更新されている
+
+---
+
+## 撤回: `--on-success-exec` 案 (kawaz 2026-06-28 21 時頃)
+
+直前に追記した `--on-success-exec` 案は **撤回** する。kawaz スタンス:
+
+> 任意コマンド実行はよくないね。ちょい危ないかも。
+> クッションを入れる意味で今の AI 指示を notify がちょうど良いかも。
+
+理由:
+
+- gh-monitor が任意 shell command を exec する経路は **shell injection / 環境汚染 / hang / 副作用** のリスクが大きい
+- 「$(...) 展開してから渡される」「正規 push hint が改ざんされたら任意 command 実行」等の事故面が広い
+- 自動化のために AI 介在を完全に削ぐより、**AI を意図的に「クッション」として残す**方が安全
+  - AI が結果通知を読んだ上で実行 = 「意図された command か」を一拍考える機会がある
+  - 失敗時の判断 / 失敗内容の解釈も AI に委ねられる
+  - 完全自動化が必要なら、それは workflow / CI 側で完結させるべき (= 自 host trigger を諦める)
+
+## 本命: `--on-success-notify` (= 上で提案した経路) で進める
+
+3 API ではなく **2 API 案** に整理:
+
+```
+--on-success <key> <msg>          (= 既存、後方互換のため残す)
+--on-success-notify <command>     (= 新規、cmux-msg notify --self 経由で AI に実行指示)
+```
+
+`--on-success-exec` は **採用しない**。die / kawaz/* repo の brew upgrade 系は `--on-success-notify` 経由で AI クッション挟む形にする。
+
+## 改めて推奨優先度
+
+中。AI 操作ミス耐性は上がる (= 3 引数 → 1 引数)、ただし AI 介在が要る点は現状 `--on-success` と同じ。革命的な改善ではなく、**引数省略事故の構造的予防** が主目的。
