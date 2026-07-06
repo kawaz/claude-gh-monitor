@@ -743,6 +743,110 @@ test_hook_has_workflow_yml_nudge() {
         ""
 }
 
+# ------------------------------------------------------------
+# git bare + jj workspace 構成 (issue 2026-07-06-workflow-absence-check-bypassed-on-jj-workspace)
+# ------------------------------------------------------------
+# 実バグ機構の忠実再現: 親に bare .git (remote + commit 付き) を置き、workdir 相当の
+# sub-dir は .git を持たず .jj マーカーのみ。git -C <sub> は親の bare を discover するので
+# `config --get remote.origin.url` は読めるが `rev-parse --show-toplevel` は exit 128
+# (this operation must be run in a work tree) になる。= _repo_toplevel が空になり
+# workflow 不在チェックが丸ごとスキップされていた (= 修正対象のバグ)。
+# echo で workdir (= sub-dir) の絶対パスを返す。
+fixture_bare_jj_workspace() {
+    local parent="$1" remote="$2" with_workflow="$3"
+    local seed; seed=$(mktemp -d)
+    # git 出力は捨てる (環境の global git hook ノイズが stdout を汚染し workdir に混ざるのを防ぐ)
+    {
+        git init -q "$seed"
+        git -C "$seed" config user.email "test@example.com"
+        git -C "$seed" config user.name "test"
+        touch "$seed/README.md"
+        git -C "$seed" add README.md
+        git -C "$seed" commit -q -m "init"
+        git clone -q --bare "$seed" "$parent/.git"     # 親を bare (core.bare=true) にする
+        # clone --bare は origin=seed を作るので add でなく set で github URL に上書きする
+        git -C "$parent/.git" config remote.origin.url "$remote"
+    } >/dev/null 2>&1
+    rm -rf "$seed"
+    mkdir -p "$parent/main/.jj"                        # jj workspace マーカー (実 jj repo ではない)
+    if [ "$with_workflow" = "yes" ]; then
+        mkdir -p "$parent/main/.github/workflows"
+        echo 'name: CI' > "$parent/main/.github/workflows/ci.yml"
+    fi
+    printf '%s' "$parent/main"
+}
+
+# stub bump-semver: `vcs get root` は cwd (= hook が cd した workdir) を、
+# `vcs get commit-id` は固定 SHA を返す。実 jj/bump-semver に依存せず、修正後の
+# fix path (bump-semver 優先で backend-agnostic に root/SHA を解決) を決定的に検証する
+# (= CI に jj/bump-semver が無くても走る)。
+write_bump_semver_stub() {
+    local bin_dir="$1" fake_sha="$2"
+    mkdir -p "$bin_dir"
+    cat > "$bin_dir/bump-semver" <<STUB
+#!/usr/bin/env bash
+if [ "\$1 \$2 \$3" = "vcs get root" ]; then pwd; exit 0; fi
+if [ "\$1 \$2 \$3" = "vcs get commit-id" ]; then echo "$fake_sha"; exit 0; fi
+exit 1
+STUB
+    chmod +x "$bin_dir/bump-semver"
+}
+
+# git bare + jj workspace で workflow 無し → nudge を出さない (= 本 issue の主眼)。
+# 修正前: git rev-parse --show-toplevel が bare で失敗 → _repo_toplevel 空 → workflow
+#   チェックがスキップされ nudge が出てしまう (= このテストは RED になる)。
+# 修正後: bump-semver vcs get root で workdir を解決 → workflow 無しを検知 → nudge なし。
+test_hook_bare_jj_workspace_no_workflow_no_nudge() {
+    local parent; parent=$(mktemp -d)
+    local stub; stub=$(mktemp -d)
+    trap 'rm -rf "$parent" "$stub"' RETURN
+    local workdir
+    workdir=$(fixture_bare_jj_workspace "$parent" "https://github.com/kawaz/no-ci-repo.git" "no")
+    write_bump_semver_stub "$stub" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+    local json
+    json=$(jq -n --arg cmd "git push origin main" --arg cwd "$workdir" \
+        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{output:""},cwd:$cwd}')
+    local out
+    out=$(env -i PATH="$stub:$PATH" HOME="$HOME" \
+        CLAUDE_PROJECT_DIR="$workdir" \
+        bash "$repo_root/hooks/post_tool_use.sh" <<< "$json" 2>&1 || true)
+
+    assert_output "hook: git bare + jj workspace, workflow 無し → nudge なし" "$out" \
+        "" \
+        "$(printf 'additionalContext\nwatch-workflow\n')"
+}
+
+# git bare + jj workspace で workflow 有り → nudge あり + SHA は bump-semver 由来。
+# 修正前: SHA は git rev-parse HEAD (bare の seed commit) になり stub SHA と一致しない
+#   → RED。修正後: bump-semver vcs get commit-id で最新固定コミット (stub SHA) を pin。
+test_hook_bare_jj_workspace_has_workflow_nudge() {
+    local parent; parent=$(mktemp -d)
+    local stub; stub=$(mktemp -d)
+    trap 'rm -rf "$parent" "$stub"' RETURN
+    local workdir
+    workdir=$(fixture_bare_jj_workspace "$parent" "https://github.com/kawaz/has-ci-repo.git" "yes")
+    write_bump_semver_stub "$stub" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+    local json
+    json=$(jq -n --arg cmd "git push origin main" --arg cwd "$workdir" \
+        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{output:""},cwd:$cwd}')
+    local out
+    out=$(env -i PATH="$stub:$PATH" HOME="$HOME" \
+        CLAUDE_PROJECT_DIR="$workdir" \
+        bash "$repo_root/hooks/post_tool_use.sh" <<< "$json" 2>&1 || true)
+
+    assert_output "hook: git bare + jj workspace, workflow 有り → nudge あり + bump-semver SHA" "$out" \
+        "$(printf 'watch-workflow\ndeadbeef\n')" \
+        ""
+}
+
+# 注: bump-semver 不在時の git fallback は既存の plain-git テスト群 (上記
+# test_hook_* が env -i PATH に bump-semver を含まない構成でも git 経路で通る) が
+# 実質カバーする。bump-semver 不在 かつ bare+jj-workspace の組み合わせは git だけでは
+# 解決不能 (= optional 依存の既知の限界、kawaz jj 環境以外では発生しない) なので
+# 該当テストは設けない。
+
 # ============================================================
 # 実行
 # ============================================================
@@ -770,6 +874,8 @@ test_hook_empty_workflow_dir_no_nudge
 test_hook_cd_push_uses_cd_repo
 test_hook_cd_push_no_workflow_in_cd_repo
 test_hook_has_workflow_yml_nudge
+test_hook_bare_jj_workspace_no_workflow_no_nudge
+test_hook_bare_jj_workspace_has_workflow_nudge
 
 echo ""
 echo "Results: $pass passed, $fail failed"

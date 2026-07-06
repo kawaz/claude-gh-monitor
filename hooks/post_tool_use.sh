@@ -32,6 +32,23 @@ set -u
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PLUGIN_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 
+# repo root を backend 非依存で解決する。
+# git bare + jj workspace 構成 (親に bare .git、各 workspace は .git を持たない) では
+# `git -C <workspace> rev-parse --show-toplevel` が bare リポに当たって exit 128 になり
+# root を解決できない。bump-semver があれば `vcs get root` (git/jj/bare+workspace 全対応)
+# を使い、無ければ従来の git rev-parse に fallback する。
+# bump-semver は optional (配布 plugin なので一般ユーザ環境に無くても動く)。
+_resolve_root() {
+    local dir="$1" root=""
+    if command -v bump-semver >/dev/null 2>&1; then
+        root=$(cd "$dir" 2>/dev/null && bump-semver vcs get root 2>/dev/null || true)
+    fi
+    if [ -z "$root" ]; then
+        root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || true)
+    fi
+    printf '%s' "$root"
+}
+
 input=$(cat)
 if [ -z "$input" ]; then
     exit 0
@@ -82,7 +99,7 @@ if [ -n "$_last_cd" ]; then
         *) _last_cd_expanded="$_last_cd" ;;
     esac
     if [ -n "${_last_cd_expanded:-}" ] && [ -d "$_last_cd_expanded" ]; then
-        _wt=$(git -C "$_last_cd_expanded" rev-parse --show-toplevel 2>/dev/null || true)
+        _wt=$(_resolve_root "$_last_cd_expanded")
         [ -n "$_wt" ] && _workdir_override="$_wt"
     fi
 fi
@@ -108,8 +125,11 @@ fi
 
 # ローカル checkout に GitHub Actions workflow が 1 つも無ければ nudge 不要 → 黙って終了
 # - 判定はローカルファイルのみ (hook は同期実行なのでネットワークコール禁止)
-# - worktree 運用前提のため git -C で toplevel を解決してからチェック
-_repo_toplevel=$(git -C "$workdir" rev-parse --show-toplevel 2>/dev/null || true)
+# - worktree / jj workspace 運用前提のため _resolve_root で toplevel を解決してからチェック
+#   (git bare + jj workspace では git rev-parse --show-toplevel が失敗するので bump-semver
+#   経由で解決する。解決不能時は従来通りチェックをスキップして nudge 側に倒す = 過剰抑制で
+#   本物の CI watch を失うより誤 nudge の方が害が軽微、という既存方針を維持)
+_repo_toplevel=$(_resolve_root "$workdir")
 if [ -n "$_repo_toplevel" ]; then
     _wf_dir="$_repo_toplevel/.github/workflows"
     if [ ! -d "$_wf_dir" ] || ! find "$_wf_dir" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null | grep -q .; then
@@ -119,18 +139,21 @@ fi
 unset _repo_toplevel _wf_dir
 
 # push 直後の head SHA を解決 (SHA-pinned 起動用)
-# - jj 管理リポでは `@` (working-copy) が空 commit のことが多く、`git rev-parse HEAD`
-#   はその空 commit を指す。実際に push されたのは `@-` (= 直前の non-empty commit)
-#   なので、empty SHA を pin すると CI run が存在せず no-match-timeout まで無駄常駐する
-#   (jj 主体の環境では push のたびに常時発生)。
-# - 対策: `.jj` が存在し jj が PATH にあれば `latest(::@ & ~empty())` で `@` の祖先
-#   から最新の non-empty commit を取る。これは `@` が empty なら `@-` を返し、`@`
-#   自身が non-empty (= `jj new` 前) なら `@` を返す。どちらも push 対象と一致する。
-# - jj 不在 / 非 jj リポは従来通り `git rev-parse HEAD` で fallback。
+# - 実際に push されたのは「最新の固定コミット」(jj では working-copy @ でなく @- 側の
+#   非空/マージコミット、git では HEAD)。jj の @ は空のことが多く、これを pin すると
+#   CI run が存在せず no-match-timeout まで無駄常駐する (jj 主体の環境では push のたびに発生)。
+# - bump-semver があれば `vcs get commit-id` を使う。bump-semver DR-0040 で default が
+#   backend-agnostic な「最新の固定コミット」(jj では heads((::@-) & (~empty() | merges()))
+#   相当 = @ を除いた最新の非空/マージコミット、git では HEAD) に修正済み。
+# - bump-semver 不在で jj リポなら同等の revset に直接 fallback。空マージも merges() で救済。
+# - jj 不在 / 非 jj リポは `git rev-parse HEAD` で fallback。
 # - hex 7..40 文字の SHA でなければ起動指示を出さない (= 不正な値での起動を避ける)
 head_sha=""
-if [ -d "$workdir/.jj" ] && command -v jj >/dev/null 2>&1; then
-    head_sha=$(jj -R "$workdir" log -r 'latest(::@ & ~empty())' --no-graph -T 'commit_id' 2>/dev/null | head -1 || true)
+if command -v bump-semver >/dev/null 2>&1; then
+    head_sha=$(cd "$workdir" 2>/dev/null && bump-semver vcs get commit-id 2>/dev/null || true)
+fi
+if [ -z "$head_sha" ] && [ -d "$workdir/.jj" ] && command -v jj >/dev/null 2>&1; then
+    head_sha=$(jj -R "$workdir" log -r 'heads((::@-) & (~empty() | merges()))' --no-graph -T 'commit_id' 2>/dev/null | head -1 || true)
 fi
 if [ -z "$head_sha" ]; then
     head_sha=$(git -C "$workdir" rev-parse HEAD 2>/dev/null || true)
