@@ -57,19 +57,31 @@ workspace 構成への対応自体は同 hook 内に前例がある。workflow �
   (誤 nudge 側)。逆 (判定不能 → 出さない) に倒すと、colocate されていない他構成で
   watch 起動そのものが死ぬ懸念があり、トレードオフの整理が必要
 
-### 追加観測 (2026-07-06 同日): repo / SHA 解決も誤る事例
+### 追加観測 (2026-07-06 同日): push 対象と異なるリポの commit を解決する事例
 
 kawaz/claude-rules-personal (main worktree、workflow なし、remote は
 `git@github.com:kawaz/claude-rules-personal.git`) で `just push` を実行した直後の
 PostToolUse nudge が (a) repo を kawaz/kuu (= そのセッションの起動 dir のリポ) と解決し、
-(b) SHA `88f288a30eb5` を指示したが、この SHA は kuu / claude-rules-personal どちらの
-jj log にも存在しない。
+(b) SHA `88f288a30eb5` を指示した。
+
+起票時点では「この SHA はどちらの jj log にも存在しない」としたが、これは検証ミス:
+検証コマンドが 2 回とも claude-rules-personal の cwd で実行されており、kuu 側は
+未検証だった。実際には `88f288a30eb5` は kawaz/kuu に並行セッション (workflow agent)
+が直前に land させた実在 commit で、kuu の jj log 上の最新 non-empty commit と一致する。
+
+したがって正しい観測は: **push 対象 (claude-rules-personal) でなく、セッション起動
+dir のリポ (kawaz/kuu) の最新 non-empty commit を正しく解決して nudge を出した**。SHA
+解決自体は正常動作しており、誤っているのは workdir (対象リポ) の選択のみ。
+
+この事実は下記の workdir 仮説を弱めず、むしろ補強する: hook ででたらめな SHA が出た
+のではなく、**kuu の最新 commit を正確に拾えている** = hook が (push 対象でなく) kuu を
+スキャンしている証拠。
 
 仮説フラグ (部外者からの提示。裏取り・採否は当事者判断):
 
 - hook の workdir 解決が Bash tool の実行時 cwd (compound command 内の `cd`) でなく
-  セッション起動 dir を拾っている可能性
-- SHA fallback が誤った workdir 上で解決されている可能性
+  セッション起動 dir を拾っている可能性 (= 上記観測により裏付けが強まった)
+- SHA 解決自体は正常 (誤りは repo/workdir 選択のみ)
 
 再現条件: セッション起動 dir と push 対象リポが異なる + 両方 git bare + jj workspace 構成
 
