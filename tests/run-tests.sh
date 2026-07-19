@@ -669,7 +669,7 @@ test_hook_cd_push_uses_cd_repo() {
     git init -q "$tmp_cd_repo"
     git -C "$tmp_cd_repo" remote add origin "https://github.com/kawaz/has-ci-repo.git"
     mkdir -p "$tmp_cd_repo/.github/workflows"
-    echo 'name: CI' > "$tmp_cd_repo/.github/workflows/ci.yml"
+    printf 'name: CI\non:\n  push:\n    branches: [main]\n' > "$tmp_cd_repo/.github/workflows/ci.yml"
     git -C "$tmp_cd_repo" config user.email "test@example.com"
     git -C "$tmp_cd_repo" config user.name "test"
     touch "$tmp_cd_repo/README.md"
@@ -700,7 +700,7 @@ test_hook_cd_push_no_workflow_in_cd_repo() {
     git init -q "$tmp_project"
     git -C "$tmp_project" remote add origin "https://github.com/kawaz/has-ci-repo.git"
     mkdir -p "$tmp_project/.github/workflows"
-    echo 'name: CI' > "$tmp_project/.github/workflows/ci.yml"
+    printf 'name: CI\non:\n  push:\n    branches: [main]\n' > "$tmp_project/.github/workflows/ci.yml"
 
     # cd 先: workflow 無しリポ
     git init -q "$tmp_cd_repo"
@@ -727,7 +727,7 @@ test_hook_has_workflow_yml_nudge() {
     git init -q "$tmp_repo"
     git -C "$tmp_repo" remote add origin "https://github.com/kawaz/has-ci-repo.git"
     mkdir -p "$tmp_repo/.github/workflows"
-    echo 'name: CI' > "$tmp_repo/.github/workflows/ci.yml"
+    printf 'name: CI\non:\n  push:\n    branches: [main]\n' > "$tmp_repo/.github/workflows/ci.yml"
     # HEAD が必要 (sha 解決用)
     git -C "$tmp_repo" config user.email "test@example.com"
     git -C "$tmp_repo" config user.name "test"
@@ -771,7 +771,7 @@ fixture_bare_jj_workspace() {
     mkdir -p "$parent/main/.jj"                        # jj workspace マーカー (実 jj repo ではない)
     if [ "$with_workflow" = "yes" ]; then
         mkdir -p "$parent/main/.github/workflows"
-        echo 'name: CI' > "$parent/main/.github/workflows/ci.yml"
+        printf 'name: CI\non:\n  push:\n    branches: [main]\n' > "$parent/main/.github/workflows/ci.yml"
     fi
     printf '%s' "$parent/main"
 }
@@ -848,6 +848,107 @@ test_hook_bare_jj_workspace_has_workflow_nudge() {
 # 該当テストは設けない。
 
 # ============================================================
+# Test: post_tool_use.sh — paths filter matching (kawaz 2026-07-19)
+# ------------------------------------------------------------
+# 変更 files が workflow の on.push.paths / paths-ignore とマッチしなければ黙る。
+# yq + python3 が要る (無ければ fail-open で nudge、そのケースは既存テストがカバー)。
+# ============================================================
+
+# 変更 file を差分持ち commit として作り、その HEAD SHA を hook に食わせる helper
+# echo で workdir と head SHA を tab 区切りで返す
+_fixture_repo_with_commit_touching() {
+    local remote="$1" workflow_yaml_content="$2" changed_paths="$3"  # changed_paths は space 区切り
+    local tmp; tmp=$(mktemp -d)
+    git init -q "$tmp"
+    git -C "$tmp" config user.email "test@example.com"
+    git -C "$tmp" config user.name "test"
+    git -C "$tmp" remote add origin "$remote"
+    mkdir -p "$tmp/.github/workflows"
+    printf '%s' "$workflow_yaml_content" > "$tmp/.github/workflows/ci.yml"
+    # 初期 commit: workflow のみ
+    git -C "$tmp" add .github
+    git -C "$tmp" commit -q -m "init"
+    # 差分 commit: 指定 paths を touch
+    for p in $changed_paths; do
+        mkdir -p "$(dirname "$tmp/$p")"
+        touch "$tmp/$p"
+    done
+    git -C "$tmp" add -A
+    git -C "$tmp" commit -q -m "change" >/dev/null 2>&1 || true
+    local sha; sha=$(git -C "$tmp" rev-parse HEAD)
+    printf '%s\t%s' "$tmp" "$sha"
+}
+
+# release.yml が paths: [VERSION] のみで、docs 変更のみの push → 黙る
+test_hook_paths_filter_no_match_no_nudge() {
+    if ! command -v yq >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+        # yq / python3 不在は fail-open (nudge)、テスト対象外
+        return 0
+    fi
+    local pair; pair=$(_fixture_repo_with_commit_touching \
+        "https://github.com/kawaz/release-only-repo.git" \
+        $'name: Release\non:\n  push:\n    branches: [main]\n    paths:\n      - VERSION\n' \
+        "docs/README.md")
+    local tmp_repo; tmp_repo=$(printf '%s' "$pair" | cut -f1)
+    trap 'rm -rf "$tmp_repo"' RETURN
+    local out; out=$(run_hook "$tmp_repo")
+    assert_output "hook: paths filter doesn't match changes → no nudge" "$out" \
+        "" \
+        "$(printf 'additionalContext\nwatch-workflow\n')"
+}
+
+# 同じ release.yml で VERSION を変更 → nudge
+test_hook_paths_filter_matches_nudge() {
+    if ! command -v yq >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+        return 0
+    fi
+    local pair; pair=$(_fixture_repo_with_commit_touching \
+        "https://github.com/kawaz/release-only-repo.git" \
+        $'name: Release\non:\n  push:\n    branches: [main]\n    paths:\n      - VERSION\n' \
+        "VERSION")
+    local tmp_repo; tmp_repo=$(printf '%s' "$pair" | cut -f1)
+    trap 'rm -rf "$tmp_repo"' RETURN
+    local out; out=$(run_hook "$tmp_repo")
+    assert_output "hook: paths filter matches VERSION → nudge" "$out" \
+        "$(printf 'additionalContext\nwatch-workflow\n')" \
+        ""
+}
+
+# paths filter を持たない workflow (無条件 push trigger) → 常に nudge
+test_hook_no_paths_filter_always_nudge() {
+    if ! command -v yq >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+        return 0
+    fi
+    local pair; pair=$(_fixture_repo_with_commit_touching \
+        "https://github.com/kawaz/plain-ci-repo.git" \
+        $'name: CI\non:\n  push:\n    branches: [main]\n' \
+        "docs/README.md")
+    local tmp_repo; tmp_repo=$(printf '%s' "$pair" | cut -f1)
+    trap 'rm -rf "$tmp_repo"' RETURN
+    local out; out=$(run_hook "$tmp_repo")
+    assert_output "hook: no paths filter → nudge regardless of changed paths" "$out" \
+        "$(printf 'additionalContext\nwatch-workflow\n')" \
+        ""
+}
+
+# paths-ignore で docs/ 除外、docs 変更のみ → 黙る
+test_hook_paths_ignore_covers_changes_no_nudge() {
+    if ! command -v yq >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+        return 0
+    fi
+    local pair; pair=$(_fixture_repo_with_commit_touching \
+        "https://github.com/kawaz/docs-ignore-repo.git" \
+        $'name: CI\non:\n  push:\n    branches: [main]\n    paths-ignore:\n      - "docs/**"\n' \
+        "docs/README.md docs/GUIDE.md")
+    local tmp_repo; tmp_repo=$(printf '%s' "$pair" | cut -f1)
+    trap 'rm -rf "$tmp_repo"' RETURN
+    local out; out=$(run_hook "$tmp_repo")
+    assert_output "hook: paths-ignore covers all changed files → no nudge" "$out" \
+        "" \
+        "$(printf 'additionalContext\nwatch-workflow\n')"
+}
+
+# ============================================================
 # 実行
 # ============================================================
 
@@ -876,6 +977,10 @@ test_hook_cd_push_no_workflow_in_cd_repo
 test_hook_has_workflow_yml_nudge
 test_hook_bare_jj_workspace_no_workflow_no_nudge
 test_hook_bare_jj_workspace_has_workflow_nudge
+test_hook_paths_filter_no_match_no_nudge
+test_hook_paths_filter_matches_nudge
+test_hook_no_paths_filter_always_nudge
+test_hook_paths_ignore_covers_changes_no_nudge
 
 echo ""
 echo "Results: $pass passed, $fail failed"

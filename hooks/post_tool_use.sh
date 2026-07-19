@@ -22,6 +22,9 @@
 #   - tool_response が失敗 (is_error == true / interrupted == true)
 #   - CLAUDE_PROJECT_DIR の origin remote から user/repo を解決できない
 #   - push 元リポのローカル checkout に .github/workflows/*.yml|*.yaml が 1 つも無い
+#   - 今の commit の変更 files に対し、どの workflow の on.push.paths / paths-ignore
+#     フィルタも trigger しない (= CI が走らないと確定できる場合。yq 不在 / parse 失敗は
+#     fail-open で nudge、= 誤抑制で本物の CI watch を失うより誤 nudge の方が害が軽微)
 
 set -u
 
@@ -136,7 +139,7 @@ if [ -n "$_repo_toplevel" ]; then
         exit 0
     fi
 fi
-unset _repo_toplevel _wf_dir
+# _repo_toplevel / _wf_dir は下の paths matching check でも使うので unset は後段でまとめる
 
 # push 直後の head SHA を解決 (SHA-pinned 起動用)
 # - 実際に push されたのは「最新の固定コミット」(jj では working-copy @ でなく @- 側の
@@ -162,6 +165,69 @@ if ! printf '%s' "$head_sha" | grep -Eq '^[0-9a-fA-F]{7,40}$'; then
     exit 0
 fi
 sha7=$(printf '%s' "$head_sha" | cut -c1-7)
+
+# 今の commit で trigger される workflow が 1 つも無ければ黙る (kawaz 指示 2026-07-19)。
+# - 判定は yq でローカル workflow の on.push.paths / paths-ignore を parse
+# - 変更 files との glob 判定は python fnmatch (macOS 標準 /usr/bin/python3)
+# - GitHub Actions の paths glob 記法との差 (**/*.md の階層深さ等) は fnmatch 近似で
+#   最善努力、判別不能なら fail-open で nudge (既存方針: 過剰抑制で本物の CI watch を
+#   失うより、誤 nudge の方が害が軽微)
+# - yq / python 不在は fail-open (nudge)
+# - repo_toplevel / wf_dir は上のワークフロー存在チェックで既に解決済み
+if [ -n "${_repo_toplevel:-}" ] && [ -n "${_wf_dir:-}" ] && command -v yq >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    _changed_files=$(git -C "$workdir" show --name-only --pretty=format: "$head_sha" 2>/dev/null | grep -v '^$' || true)
+    if [ -n "$_changed_files" ]; then
+        _any_triggered=0
+        _any_undecidable=0
+        for _wf in "$_wf_dir"/*.yml "$_wf_dir"/*.yaml; do
+            [ -f "$_wf" ] || continue
+            _on_push=$(yq -r '.on.push // "-"' "$_wf" 2>/dev/null || echo "-")
+            if [ "$_on_push" = "-" ] || [ "$_on_push" = "null" ]; then
+                continue  # この workflow は push trigger を持たない (tag / workflow_dispatch / schedule 等)
+            fi
+            _paths=$(yq -o=json '.on.push.paths // []' "$_wf" 2>/dev/null || echo "[]")
+            _paths_ignore=$(yq -o=json '.on.push["paths-ignore"] // []' "$_wf" 2>/dev/null || echo "[]")
+            if [ "$_paths" = "[]" ] && [ "$_paths_ignore" = "[]" ]; then
+                _any_triggered=1
+                break
+            fi
+            # python fnmatch で trigger 判定 (exit 0 = triggered, 1 = not, 2 = fail)
+            python3 -c '
+import fnmatch, json, sys
+paths = json.loads(sys.argv[1])
+paths_ignore = json.loads(sys.argv[2])
+changed = [f for f in sys.argv[3].split("\n") if f]
+def matches(path, patterns):
+    for p in patterns:
+        # GitHub Actions では ** は 0+ ディレクトリ。fnmatch は ** を認識しないので
+        # ** を * に潰した pattern も併用して近似 (**/*.md → */*.md → *.md 相当)
+        if fnmatch.fnmatchcase(path, p):
+            return True
+        p2 = p.replace("**/", "").replace("/**", "").replace("**", "*")
+        if p2 != p and fnmatch.fnmatchcase(path, p2):
+            return True
+    return False
+for f in changed:
+    if paths_ignore and matches(f, paths_ignore):
+        continue
+    if not paths or matches(f, paths):
+        sys.exit(0)  # triggered
+sys.exit(1)  # not triggered by this workflow
+' "$_paths" "$_paths_ignore" "$_changed_files"
+            case $? in
+                0) _any_triggered=1; break ;;
+                1) : ;;  # not triggered by this workflow, continue
+                *) _any_undecidable=1 ;;  # python 内エラー等
+            esac
+        done
+        if [ "$_any_triggered" -eq 0 ] && [ "$_any_undecidable" -eq 0 ]; then
+            # どの workflow も trigger されないと確定 → 黙る
+            exit 0
+        fi
+    fi
+    unset _changed_files _any_triggered _any_undecidable _on_push _paths _paths_ignore _wf
+fi
+unset _repo_toplevel _wf_dir
 
 # additionalContext を JSON で返す
 # Monitor 起動コマンドのパスは hook 内で解決した絶対パスを使う (literal

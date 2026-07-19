@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `hooks/post_tool_use.sh`: 今の commit の変更 files に対し、どの workflow の `on.push.paths` / `paths-ignore` フィルタも trigger しない場合は無言終了 (kawaz 2026-07-19 発題)。判定は yq でローカル workflow を parse、変更 files との glob 判定は python `fnmatch` (macOS 標準 `/usr/bin/python3`)。GitHub Actions の `**` glob との差は fnmatch 近似で最善努力、判別不能・yq/python 不在は fail-open (nudge、既存方針)。`paths` / `paths-ignore` を持たない workflow が 1 つでもあれば無条件 trigger 扱いで nudge (`ci.yml` 等の一般ケース)。`release.yml` が `paths: [VERSION]` のみで trigger するリポで docs のみの push で毎回 nudge されていた無駄を排除
 - `hooks/post_tool_use.sh`: push 元リポのローカル checkout に `.github/workflows/*.yml|*.yaml` が 1 つも無ければ nudge を出さず即 exit 0。workflow を持たないリポへの push で Monitor が空回りする無駄を排除。`git rev-parse --show-toplevel` で worktree 対応済み。ヘッダコメントの「起動指示を出さない条件」にも追記
 - `hooks/post_tool_use.sh`: `cd <path> && ... push` 形式の越境 push における repo 誤認を軽減。`command` から末尾の `cd` パスを 1 個 parse し、存在する git リポなら `CLAUDE_PROJECT_DIR` より優先して workdir を決定。チルダ展開のみ行い、シェル変数 `$...` を含む場合や解決不能なパスは安全側 (`CLAUDE_PROJECT_DIR`) にフォールバック
 - `scripts/watch-workflow.sh`: watch ループ開始前に `gh api /repos/<owner/repo>/actions/workflows` で `total_count` を確認し、0 なら `[INFO] no workflows in <repo> — nothing to watch` を出して exit 0。API 失敗時は fail-open (= 判定スキップして watch 継続)
