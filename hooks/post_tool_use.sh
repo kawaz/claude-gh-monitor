@@ -44,7 +44,7 @@ PLUGIN_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 _resolve_root() {
     local dir="$1" root=""
     if command -v bump-semver >/dev/null 2>&1; then
-        root=$(cd "$dir" 2>/dev/null && bump-semver vcs get root 2>/dev/null || true)
+        root=$( { cd "$dir" 2>/dev/null && bump-semver vcs get root 2>/dev/null; } || true)
     fi
     if [ -z "$root" ]; then
         root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || true)
@@ -153,7 +153,7 @@ fi
 # - hex 7..40 文字の SHA でなければ起動指示を出さない (= 不正な値での起動を避ける)
 head_sha=""
 if command -v bump-semver >/dev/null 2>&1; then
-    head_sha=$(cd "$workdir" 2>/dev/null && bump-semver vcs get commit-id 2>/dev/null || true)
+    head_sha=$( { cd "$workdir" 2>/dev/null && bump-semver vcs get commit-id 2>/dev/null; } || true)
 fi
 if [ -z "$head_sha" ] && [ -d "$workdir/.jj" ] && command -v jj >/dev/null 2>&1; then
     head_sha=$(jj -R "$workdir" log -r 'heads((::@-) & (~empty() | merges()))' --no-graph -T 'commit_id' 2>/dev/null | head -1 || true)
