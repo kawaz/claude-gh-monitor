@@ -1,5 +1,5 @@
 ---
-description: "Continuously watch a GitHub PR (the one tied to the current session, or one given as argument) and notify on new event"
+description: "Continuously watch a GitHub PR (the one tied to the current session, or one given as argument) and notify on new events"
 ---
 
 # watch-pr
