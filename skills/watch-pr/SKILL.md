@@ -1,5 +1,5 @@
 ---
-description: "Continuously watch a GitHub PR (the one tied to the current session, or one given as argument) and notify on new comments, reviews, CI check changes, and merge/close events via the Monitor tool. Suggest enabling on SessionStart, right after push, or while waiting for reviews/CI — even without explicit instruction. (日本語: 現在のセッションに紐づく GitHub PR の状態変化を Monitor ツールで継続監視し、新規コメント・レビュー・CI・マージ状態の変化を通知する。PR 作業中・push 直後・レビュー待ち・CI 待ちでは明示指示なしでも起動提案してよい。)"
+description: "Continuously watch a GitHub PR (the one tied to the current session, or one given as argument) and notify on new event"
 ---
 
 # watch-pr

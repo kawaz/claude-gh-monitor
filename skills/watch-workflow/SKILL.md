@@ -1,5 +1,5 @@
 ---
-description: "Watch GitHub Actions workflow runs via the Monitor tool and emit one-line notifications on state changes. Two modes: SHA-pinned (recommended for own work — pin to a specific commit, auto-exit when all checks reach terminal state) and Passive (opt-in, repo-wide, idle backoff, runs until --timeout). PostToolUse hook prompts launching this skill in SHA-pinned mode right after `git/jj/just/pkf push`. Suggest enabling after push or while waiting for CI — even without explicit instruction. Prefer SHA-pinned to avoid leaving idle pollers behind. (日本語: GitHub Actions の workflow run を Monitor 経由で監視し、状態変化を 1 行通知。SHA-pinned モード=特定コミットを追跡し全 check 終了で自動 exit (自分作業の第一推奨)、Passive モード=repo 全体を idle backoff 付きで監視 (明示オプトイン)。push 直後は SHA-pinned で起動するのが基本。)"
+description: "Watch GitHub Actions workflow runs via the Monitor tool and emit one-line notifications on state changes."
 ---
 
 # watch-workflow
