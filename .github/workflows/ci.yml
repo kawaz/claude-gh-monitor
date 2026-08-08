@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - name: Ensure shellcheck
         run: shellcheck --version || (sudo apt-get update && sudo apt-get install -y shellcheck)
       - name: Install Claude Code via bun (for claude plugin validate)
