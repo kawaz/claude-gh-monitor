@@ -19,7 +19,7 @@
 | ディレクトリ | 方式 | 結果 |
 |---|---|---|
 | `claude-pr-monitor/main` | git bare + jj workspace | `git rev-parse --abbrev-ref HEAD` → fatal error、`git branch --show-current` → `main` |
-| `antenna/2074-feature-dashboard-redesign` | git bare + worktree | `git branch --show-current` → `feature/dashboard-redesign` |
+| `<work-repo>/2074-feature-dashboard-redesign` | git bare + worktree | `git branch --show-current` → `feature/dashboard-redesign` |
 
 ### 検証コマンド
 
@@ -36,7 +36,7 @@ jj log -r @ --no-graph -T 'bookmarks ++ "\n"'
 ```
 
 ```bash
-# git worktree 側（antenna/2074-...）
+# git worktree 側（<work-repo>/2074-...）
 :;git branch --show-current
 # → feature/dashboard-redesign
 ```
