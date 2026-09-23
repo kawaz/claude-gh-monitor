@@ -18,8 +18,8 @@
 #
 # 起動指示を出さない条件 (= exit 0 で黙る):
 #   - tool_name が Bash でない
-#   - tool_input.command が push regex にマッチしない
-#   - tool_response が失敗 (is_error == true / interrupted == true)
+#   - tool_input.command に実行単位先頭の push command がない
+#   - tool_response に push 完了の証拠がない、または background 起動通知である
 #   - CLAUDE_PROJECT_DIR の origin remote から user/repo を解決できない
 #   - push 元リポのローカル checkout に .github/workflows/*.yml|*.yaml が 1 つも無い
 #   - 今の commit の変更 files に対し、どの workflow の on.push.paths / paths-ignore
@@ -63,18 +63,46 @@ tool_name=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null)
 command=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -n "$command" ] || exit 0
 
-# push regex (DR-0003 確定版)
-#   コマンド区切り (行頭 / `(` / `;` / `&` / `|`) のあとに
-#   `git push` / `jj git push` / `just push` / `pkf run push` のいずれかが現れる
-if ! [[ "$command" =~ (^|[\(\;\&\|])[[:space:]]*((jj[[:space:]]+)?git|just|pkf[[:space:]]+run)[[:space:]]+push($|[^a-zA-Z0-9_-]) ]]; then
+# push command は shell の実行単位の先頭だけを認識する。shlex で引用符・comment を
+# 除外し、行頭 / && / ; の直後にある対応 command と --branch を抽出する。
+push_info=$(python3 - "$command" <<'PY_COMMAND' 2>/dev/null || true
+import shlex
+import sys
+
+lexer = shlex.shlex(sys.argv[1], posix=True, punctuation_chars=";&")
+lexer.whitespace_split = True
+lexer.commenters = "#"
+tokens = list(lexer)
+starts = {0} | {i + 1 for i, token in enumerate(tokens) if token in {";", "&&"}}
+commands = (("jj", "git", "push"), ("git", "push"), ("just", "push"), ("pkf", "run", "push"))
+for start in sorted(starts):
+    for prefix in commands:
+        if tuple(tokens[start:start + len(prefix)]) != prefix:
+            continue
+        end = next((i for i in range(start + len(prefix), len(tokens)) if tokens[i] in {";", "&&", "&"}), len(tokens))
+        args = tokens[start + len(prefix):end]
+        branch = ""
+        for i, arg in enumerate(args):
+            if arg.startswith("--branch="):
+                branch = arg.split("=", 1)[1]
+            elif arg == "--branch" and i + 1 < len(args):
+                branch = args[i + 1]
+        print("MATCH\t" + branch)
+        raise SystemExit
+PY_COMMAND
+)
+case "$push_info" in
+    MATCH$'\t'*) push_branch=${push_info#*$'\t'} ;;
+    *) exit 0 ;;
+esac
+
+# PostToolUse は成功した tool にだけ発火するが、Bash の正常終了だけでは push 完了の
+# 証明にならない。background 起動通知を除外し、各 push backend の完了出力を要求する。
+tool_response=$(printf '%s' "$input" | jq -r '[.tool_response // {} | .. | strings] | join("\n")' 2>/dev/null)
+if printf '%s' "$input" | jq -e '.tool_response.backgroundTaskId != null' >/dev/null 2>&1; then
     exit 0
 fi
-
-# tool_response の成否判定
-# - is_error == true → 失敗
-# - interrupted == true → 中断 (失敗扱い)
-# - それ以外 (フィールドなし含む) → 成功とみなす (誤マッチは害が軽微)
-if printf '%s' "$input" | jq -e '.tool_response.is_error == true or .tool_response.interrupted == true' >/dev/null 2>&1; then
+if ! printf '%s\n' "$tool_response" | grep -Eq 'Changes to push( to origin)?|(^|[[:space:]])[^[:space:]]+[[:space:]]+->[[:space:]]+[^[:space:]]+'; then
     exit 0
 fi
 
@@ -141,18 +169,33 @@ if [ -n "$_repo_toplevel" ]; then
 fi
 # _repo_toplevel / _wf_dir は下の paths matching check でも使うので unset は後段でまとめる
 
-# push 直後の head SHA を解決 (SHA-pinned 起動用)
-# - 実際に push されたのは「最新の固定コミット」(jj では working-copy @ でなく @- 側の
-#   非空/マージコミット、git では HEAD)。jj の @ は空のことが多く、これを pin すると
-#   CI run が存在せず no-match-timeout まで無駄常駐する (jj 主体の環境では push のたびに発生)。
-# - bump-semver があれば `vcs get commit-id` を使う。bump-semver DR-0040 で default が
-#   backend-agnostic な「最新の固定コミット」(jj では heads((::@-) & (~empty() | merges()))
-#   相当 = @ を除いた最新の非空/マージコミット、git では HEAD) に修正済み。
-# - bump-semver 不在で jj リポなら同等の revset に直接 fallback。空マージも merges() で救済。
-# - jj 不在 / 非 jj リポは `git rev-parse HEAD` で fallback。
-# - hex 7..40 文字の SHA でなければ起動指示を出さない (= 不正な値での起動を避ける)
+# push 後の remote SHA を解決する。明示 --branch を優先し、未指定なら origin/HEAD、
+# remote branch が 1 本だけならその名前、最後に Git の既定 branch 設定を使う。
+if [ -z "$push_branch" ]; then
+    push_branch=$(git -C "$workdir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true)
+fi
+if [ -z "$push_branch" ]; then
+    _remote_branches=$(git -C "$workdir" for-each-ref --format='%(refname:strip=3)' refs/remotes/origin 2>/dev/null | grep -v '^HEAD$' || true)
+    if [ "$(printf '%s\n' "$_remote_branches" | grep -c .)" -eq 1 ]; then
+        push_branch=$_remote_branches
+    fi
+fi
+if [ -z "$push_branch" ]; then
+    push_branch=$(git -C "$workdir" config init.defaultBranch 2>/dev/null || true)
+fi
+[ -n "$push_branch" ] || push_branch=main
+unset _remote_branches
+
 head_sha=""
-if command -v bump-semver >/dev/null 2>&1; then
+if [ -d "$workdir/.jj" ] && command -v jj >/dev/null 2>&1; then
+    head_sha=$(jj -R "$workdir" log -r "${push_branch}@origin" --no-graph -T 'commit_id' 2>/dev/null | head -1 || true)
+fi
+if [ -z "$head_sha" ]; then
+    head_sha=$(git -C "$workdir" rev-parse --verify "refs/remotes/origin/${push_branch}^{commit}" 2>/dev/null || true)
+fi
+
+# remote ref が取得できない環境だけ、最新の固定 local commit に fallback する。
+if [ -z "$head_sha" ] && command -v bump-semver >/dev/null 2>&1; then
     head_sha=$( { cd "$workdir" 2>/dev/null && bump-semver vcs get commit-id 2>/dev/null; } || true)
 fi
 if [ -z "$head_sha" ] && [ -d "$workdir/.jj" ] && command -v jj >/dev/null 2>&1; then
@@ -181,12 +224,12 @@ if [ -n "${_repo_toplevel:-}" ] && [ -n "${_wf_dir:-}" ] && command -v yq >/dev/
         _any_undecidable=0
         for _wf in "$_wf_dir"/*.yml "$_wf_dir"/*.yaml; do
             [ -f "$_wf" ] || continue
-            _on_push=$(yq -r '.on.push // "-"' "$_wf" 2>/dev/null || echo "-")
+            _on_push=$(yq -r '.["on"].push // "-"' "$_wf" 2>/dev/null || echo "-")
             if [ "$_on_push" = "-" ] || [ "$_on_push" = "null" ]; then
                 continue  # この workflow は push trigger を持たない (tag / workflow_dispatch / schedule 等)
             fi
-            _paths=$(yq -o=json '.on.push.paths // []' "$_wf" 2>/dev/null || echo "[]")
-            _paths_ignore=$(yq -o=json '.on.push["paths-ignore"] // []' "$_wf" 2>/dev/null || echo "[]")
+            _paths=$(yq -o=json '.["on"].push.paths // []' "$_wf" 2>/dev/null || echo "[]")
+            _paths_ignore=$(yq -o=json '.["on"].push["paths-ignore"] // []' "$_wf" 2>/dev/null || echo "[]")
             if [ "$_paths" = "[]" ] && [ "$_paths_ignore" = "[]" ]; then
                 _any_triggered=1
                 break

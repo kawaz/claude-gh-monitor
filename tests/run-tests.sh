@@ -614,7 +614,7 @@ run_hook() {
     json=$(jq -n \
         --arg cmd "$push_cmd" \
         --arg cwd "$project_dir" \
-        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{output:""},cwd:$cwd}')
+        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{stdout:"main -> main",stderr:""},cwd:$cwd}')
     env -i PATH="$PATH" HOME="$HOME" \
         CLAUDE_PROJECT_DIR="$project_dir" \
         $extra_env \
@@ -675,11 +675,12 @@ test_hook_cd_push_uses_cd_repo() {
     touch "$tmp_cd_repo/README.md"
     git -C "$tmp_cd_repo" add README.md
     git -C "$tmp_cd_repo" commit -q -m "init"
+    git -C "$tmp_cd_repo" update-ref refs/remotes/origin/main "$(git -C "$tmp_cd_repo" rev-parse HEAD)"
 
     local cmd="cd $tmp_cd_repo && just push"
     local json
     json=$(jq -n --arg cmd "$cmd" --arg cwd "$tmp_project" \
-        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{output:""},cwd:$cwd}')
+        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{stdout:"Changes to push to origin: main -> main",stderr:""},cwd:$cwd}')
     local out
     out=$(env -i PATH="$PATH" HOME="$HOME" \
         CLAUDE_PROJECT_DIR="$tmp_project" \
@@ -709,7 +710,7 @@ test_hook_cd_push_no_workflow_in_cd_repo() {
     local cmd="cd $tmp_cd_repo && git push"
     local json
     json=$(jq -n --arg cmd "$cmd" --arg cwd "$tmp_project" \
-        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{output:""},cwd:$cwd}')
+        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{stdout:"Changes to push to origin: main -> main",stderr:""},cwd:$cwd}')
     local out
     out=$(env -i PATH="$PATH" HOME="$HOME" \
         CLAUDE_PROJECT_DIR="$tmp_project" \
@@ -734,6 +735,7 @@ test_hook_has_workflow_yml_nudge() {
     touch "$tmp_repo/README.md"
     git -C "$tmp_repo" add README.md
     git -C "$tmp_repo" commit -q -m "init"
+    git -C "$tmp_repo" update-ref refs/remotes/origin/main "$(git -C "$tmp_repo" rev-parse HEAD)"
 
     local out
     out=$(run_hook "$tmp_repo")
@@ -806,7 +808,7 @@ test_hook_bare_jj_workspace_no_workflow_no_nudge() {
 
     local json
     json=$(jq -n --arg cmd "git push origin main" --arg cwd "$workdir" \
-        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{output:""},cwd:$cwd}')
+        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{stdout:"Changes to push to origin: main -> main",stderr:""},cwd:$cwd}')
     local out
     out=$(env -i PATH="$stub:$PATH" HOME="$HOME" \
         CLAUDE_PROJECT_DIR="$workdir" \
@@ -826,19 +828,21 @@ test_hook_bare_jj_workspace_has_workflow_nudge() {
     trap 'rm -rf "$parent" "$stub"' RETURN
     local workdir
     workdir=$(fixture_bare_jj_workspace "$parent" "https://github.com/kawaz/has-ci-repo.git" "yes")
+    local remote_sha; remote_sha=$(git -C "$parent/.git" rev-parse HEAD)
+    git -C "$parent/.git" update-ref refs/remotes/origin/main "$remote_sha"
     write_bump_semver_stub "$stub" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 
     local json
     json=$(jq -n --arg cmd "git push origin main" --arg cwd "$workdir" \
-        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{output:""},cwd:$cwd}')
+        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{stdout:"Changes to push to origin: main -> main",stderr:""},cwd:$cwd}')
     local out
     out=$(env -i PATH="$stub:$PATH" HOME="$HOME" \
         CLAUDE_PROJECT_DIR="$workdir" \
         bash "$repo_root/hooks/post_tool_use.sh" <<< "$json" 2>&1 || true)
 
-    assert_output "hook: git bare + jj workspace, workflow 有り → nudge あり + bump-semver SHA" "$out" \
-        "$(printf 'watch-workflow\ndeadbeef\n')" \
-        ""
+    assert_output "hook: git bare + jj workspace, workflow 有り → remote SHA を監視" "$out" \
+        "$(printf '%s\nwatch-workflow' "$remote_sha")" \
+        "deadbeef"
 }
 
 # 注: bump-semver 不在時の git fallback は既存の plain-git テスト群 (上記
@@ -875,6 +879,7 @@ _fixture_repo_with_commit_touching() {
     done
     git -C "$tmp" add -A
     git -C "$tmp" commit -q -m "change" >/dev/null 2>&1 || true
+    git -C "$tmp" update-ref refs/remotes/origin/main "$(git -C "$tmp" rev-parse HEAD)"
     local sha; sha=$(git -C "$tmp" rev-parse HEAD)
     printf '%s\t%s' "$tmp" "$sha"
 }
@@ -949,6 +954,78 @@ test_hook_paths_ignore_covers_changes_no_nudge() {
 }
 
 # ============================================================
+# Test: post_tool_use.sh — push 完了判定・command 境界・remote SHA
+# ============================================================
+run_hook_json() {
+    local project_dir="$1" command="$2" output="$3"
+    jq -n --arg cmd "$command" --arg cwd "$project_dir" --arg out "$output" \
+        '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:{stdout:$out,stderr:""},cwd:$cwd}' | \
+        env -i PATH="$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$project_dir" \
+        bash "$repo_root/hooks/post_tool_use.sh" 2>&1 || true
+}
+
+fixture_hook_repo() {
+    local repo="$1"
+    git init -q "$repo"
+    git -C "$repo" config user.email test@example.com
+    git -C "$repo" config user.name test
+    git -C "$repo" remote add origin https://github.com/kawaz/hook-test.git
+    mkdir -p "$repo/.github/workflows"
+    printf 'name: CI\non:\n  push:\n    branches: [main]\n' > "$repo/.github/workflows/ci.yml"
+    printf local > "$repo/value"
+    git -C "$repo" add .
+    git -C "$repo" commit -q -m local
+}
+
+test_hook_remote_sha_preferred_and_branch() {
+    local repo; repo=$(mktemp -d)
+    trap 'rm -rf "$repo"' RETURN
+    fixture_hook_repo "$repo"
+    local local_sha remote_sha
+    local_sha=$(git -C "$repo" rev-parse HEAD)
+    printf remote > "$repo/value"
+    git -C "$repo" commit -qam remote
+    remote_sha=$(git -C "$repo" rev-parse HEAD)
+    git -C "$repo" update-ref refs/remotes/origin/release "$remote_sha"
+    git -C "$repo" reset -q --hard "$local_sha"
+    local out; out=$(run_hook_json "$repo" 'git push --branch release' 'abc -> release')
+    assert_output "hook: explicit branch uses pushed remote SHA" "$out" \
+        "$(printf '%s\nwatch-workflow' "$remote_sha")" "$local_sha"
+}
+
+test_hook_completion_and_command_boundaries() {
+    local repo; repo=$(mktemp -d)
+    trap 'rm -rf "$repo"' RETURN
+    fixture_hook_repo "$repo"
+    local sha; sha=$(git -C "$repo" rev-parse HEAD)
+    git -C "$repo" update-ref refs/remotes/origin/main "$sha"
+    local command output out name
+    while IFS='|' read -r name command output; do
+        out=$(run_hook_json "$repo" "$command" "$output")
+        assert_output "hook: $name" "$out" "watch-workflow" ""
+    done <<'CASES'
+just push|just push|Changes to push to origin:
+jj git push|jj git push|Changes to push:
+git push after &&|true && git push|main -> main
+pkf run push after semicolon|true; pkf run push|Changes to push to origin:
+CASES
+    local background_json
+    background_json=$(jq -n --arg cwd "$repo" '{tool_name:"Bash",tool_input:{command:"just push",run_in_background:true},tool_response:{stdout:"",stderr:"",interrupted:false,isImage:false,noOutputExpected:false,backgroundTaskId:"b4wk29axb"},cwd:$cwd}')
+    out=$(printf '%s' "$background_json" | env -i PATH="$PATH" HOME="$HOME" CLAUDE_PROJECT_DIR="$repo" bash "$repo_root/hooks/post_tool_use.sh" 2>&1 || true)
+    assert_output "hook: background launch response" "$out" "" "watch-workflow"
+    while IFS='|' read -r name command output; do
+        out=$(run_hook_json "$repo" "$command" "$output")
+        assert_output "hook: $name" "$out" "" "watch-workflow"
+    done <<'CASES'
+missing completion|just push|ensure-clean failed
+grep argument|grep "just push" file|Changes to push to origin:
+quoted command|printf '%s' 'just push'|Changes to push to origin:
+comment|true # just push|Changes to push to origin:
+pipeline|true | git push|main -> main
+CASES
+}
+
+# ============================================================
 # 実行
 # ============================================================
 
@@ -981,6 +1058,8 @@ test_hook_paths_filter_no_match_no_nudge
 test_hook_paths_filter_matches_nudge
 test_hook_no_paths_filter_always_nudge
 test_hook_paths_ignore_covers_changes_no_nudge
+test_hook_remote_sha_preferred_and_branch
+test_hook_completion_and_command_boundaries
 
 echo ""
 echo "Results: $pass passed, $fail failed"
