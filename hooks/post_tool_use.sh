@@ -19,7 +19,7 @@
 # 起動指示を出さない条件 (= exit 0 で黙る):
 #   - tool_name が Bash でない
 #   - tool_input.command に実行単位先頭の push command がない
-#   - tool_response に push 完了の証拠がない、または background 起動通知である
+#   - tool_response に push 完了の証拠がない、または中断・background 起動通知である
 #   - CLAUDE_PROJECT_DIR の origin remote から user/repo を解決できない
 #   - push 元リポのローカル checkout に .github/workflows/*.yml|*.yaml が 1 つも無い
 #   - 今の commit の変更 files に対し、どの workflow の on.push.paths / paths-ignore
@@ -97,12 +97,12 @@ case "$push_info" in
 esac
 
 # PostToolUse は成功した tool にだけ発火するが、Bash の正常終了だけでは push 完了の
-# 証明にならない。background 起動通知を除外し、各 push backend の完了出力を要求する。
+# 証明にならない。中断・background 起動通知を除外し、各 push backend の完了出力を要求する。
 tool_response=$(printf '%s' "$input" | jq -r '[.tool_response // {} | .. | strings] | join("\n")' 2>/dev/null)
-if printf '%s' "$input" | jq -e '.tool_response.backgroundTaskId != null' >/dev/null 2>&1; then
+if printf '%s' "$input" | jq -e '.tool_response.interrupted == true or .tool_response.backgroundTaskId != null' >/dev/null 2>&1; then
     exit 0
 fi
-if ! printf '%s\n' "$tool_response" | grep -Eq 'Changes to push( to origin)?|(^|[[:space:]])[^[:space:]]+[[:space:]]+->[[:space:]]+[^[:space:]]+'; then
+if ! printf '%s\n' "$tool_response" | grep -Eq 'Changes to push( to origin)?|^[[:space:]]*([0-9a-f]+\.\.\.?[0-9a-f]+|\* \[new (branch|tag)\]|\+ [0-9a-f]+\.\.\.?[0-9a-f]+)[[:space:]]+[^[:space:]]+ -> [^[:space:]]+'; then
     exit 0
 fi
 
